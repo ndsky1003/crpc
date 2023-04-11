@@ -72,6 +72,7 @@ func (this *Client) keepAlive() {
 	for {
 		if !this.getConnecting() {
 			conn, err := net.Dial("tcp", this.url)
+
 			if err != nil {
 				logrus.Errorf("dail err:%v\n", err)
 				time.Sleep(this.checkInterval * time.Second)

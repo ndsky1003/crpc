@@ -3,24 +3,26 @@ package header
 import (
 	"testing"
 
+	"github.com/ndsky1003/crpc/coder"
 	"github.com/ndsky1003/crpc/compressor"
 )
 
 func TestHeader_Marshal(t *testing.T) {
 	h := &Header{
-		Type:         header_type_req,
-		CompressType: compressor.Snappy,
+		Type:         header_type_res,
+		CoderType:    coder.JSON,
+		CompressType: compressor.Raw,
 		Service:      "db",
 		Module:       "rpc",
 		Method:       "ChangePwd",
 		Seq:          1,
-		RequestLen:   100,
+		BodyLen:      100,
 		Checksum:     12834,
 	}
 	data := h.Marshal()
 	t.Log(data)
 	t.Error(1)
-	h1 := GetRequestHeader()
+	h1 := Get()
 	h1.Unmarshal(data)
 	t.Logf("%+v", h1)
 }

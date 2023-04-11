@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/ndsky1003/crpc/coder"
 	"github.com/ndsky1003/crpc/compressor"
 )
 
@@ -26,20 +27,21 @@ const (
 var UnmarshalError = errors.New("error occurred in Unmarshal")
 
 // Header request header structure looks like:
-// +------------+--------------+-----------------+-------------------+-----------------+----------+------------+----------+
-// | HeaderType | CompressType |  Service	     |      Module       |  Method	       |    Seq   | RequestLen | Checksum |
-// +------------+--------------+-----------------+-------------------+-----------------+----------+------------+----------+
-// |   uint16   |    uint16    | uvarint+ string | uvarint + string  | uvarint +string |  uvarint |   uvarint  |  uint32  |
-// +------------+--------------+-----------------+-------------------+-----------------+----------+------------+----------+
+// +----------+---------+------------+-----------------+-------------------+-----------------+----------+------------+----------+
+// |HeaderType|CoderType|CompressType|  Service	       |      Module       |  Method	     |    Seq   | RequestLen | Checksum |
+// +----------+---------+------------+-----------------+-------------------+-----------------+----------+------------+----------+
+// | uint16   | uint16  |   uint16   | uvarint+ string | uvarint + string  | uvarint +string |  uvarint |   uvarint  |  uint32  |
+// +----------+---------+------------+-----------------+-------------------+-----------------+----------+------------+----------+
 type Header struct {
 	sync.RWMutex
 	Type         header_type
+	CoderType    coder.CoderType
 	CompressType compressor.CompressType
 	Service      string
 	Module       string
 	Method       string
 	Seq          uint64
-	RequestLen   uint32
+	BodyLen      uint32
 	Checksum     uint32
 }
 
@@ -53,6 +55,9 @@ func (r *Header) Marshal() []byte {
 	binary.LittleEndian.PutUint16(header[idx:], uint16(r.Type))
 	idx += Uint16Size
 
+	binary.LittleEndian.PutUint16(header[idx:], uint16(r.CoderType))
+	idx += Uint16Size
+
 	binary.LittleEndian.PutUint16(header[idx:], uint16(r.CompressType))
 	idx += Uint16Size
 
@@ -63,7 +68,7 @@ func (r *Header) Marshal() []byte {
 	idx += writeString(header[idx:], r.Method)
 
 	idx += binary.PutUvarint(header[idx:], r.Seq)
-	idx += binary.PutUvarint(header[idx:], uint64(r.RequestLen))
+	idx += binary.PutUvarint(header[idx:], uint64(r.BodyLen))
 	binary.LittleEndian.PutUint32(header[idx:], r.Checksum)
 	idx += Uint32Size
 	return header[:idx]
@@ -86,6 +91,9 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 	r.Type = binary.LittleEndian.Uint16(data[idx:])
 	idx += Uint16Size
 
+	r.CoderType = coder.CoderType(binary.LittleEndian.Uint16(data[idx:]))
+	idx += Uint16Size
+
 	r.CompressType = compressor.CompressType(binary.LittleEndian.Uint16(data[idx:]))
 	idx += Uint16Size
 
@@ -102,7 +110,7 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 	idx += size
 
 	length, size := binary.Uvarint(data[idx:])
-	r.RequestLen = uint32(length)
+	r.BodyLen = uint32(length)
 	idx += size
 
 	r.Checksum = binary.LittleEndian.Uint32(data[idx:])
@@ -110,10 +118,16 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 	return
 }
 
+func (r *Header) GetCoderType() coder.CoderType {
+	r.RLock()
+	defer r.RUnlock()
+	return r.CoderType
+}
+
 func (r *Header) GetCompressType() compressor.CompressType {
 	r.RLock()
 	defer r.RUnlock()
-	return compressor.CompressType(r.CompressType)
+	return r.CompressType
 }
 
 func (r *Header) Reset() {
@@ -125,8 +139,9 @@ func (r *Header) Reset() {
 	r.Service = ""
 	r.Module = ""
 	r.Method = ""
+	r.CoderType = 0
 	r.CompressType = 0
-	r.RequestLen = 0
+	r.BodyLen = 0
 }
 
 func readString(data []byte) (string, int) {

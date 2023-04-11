@@ -11,18 +11,12 @@ func init() {
 		return &Header{}
 	}}
 }
-func GetRequestHeader() *Header {
+func Get() *Header {
 	h := pool.Get().(*Header)
-	h.Type = header_type_req
-	return h
-}
-func GetResponseHeader() *Header {
-	h := pool.Get().(*Header)
-	h.Type = header_type_res
 	return h
 }
 
-func ReleaseHeader(h *Header) {
-	h.ResetHeader()
+func Release(h *Header) {
+	h.Reset()
 	pool.Put(h)
 }

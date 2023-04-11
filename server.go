@@ -18,7 +18,7 @@ type server struct {
 	mutex     sync.RWMutex
 	seq       uint64
 	monitor   map[*msg.EventTopic]map[uint64]struct{}
-	services  map[uint64]*service
+	services  map[uint64]*module
 
 	reqTimeOut time.Duration //请求超时
 	reqSeq     uint64
@@ -39,7 +39,7 @@ type serverReqMeta struct {
 
 func NewServer(opts ...*options.ServerOptions) *server {
 	c := &server{
-		services:   map[uint64]*service{},
+		services:   map[uint64]*module{},
 		monitor:    map[*msg.EventTopic]map[uint64]struct{}{},
 		reqTimeOut: 10,
 		reqMetas:   map[uint64]*serverReqMeta{},
