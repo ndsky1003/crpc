@@ -5,7 +5,6 @@ import (
 )
 
 type ClientOptions struct {
-	Name          *string
 	CheckInterval *time.Duration
 	HeartInterval *time.Duration
 	IsStopHeart   *bool
@@ -13,13 +12,6 @@ type ClientOptions struct {
 
 func Client() *ClientOptions {
 	return new(ClientOptions)
-}
-func (this *ClientOptions) SetName(name string) *ClientOptions {
-	if this == nil {
-		return this
-	}
-	this.Name = &name
-	return this
 }
 
 func (this *ClientOptions) SetCheckInterval(t time.Duration) *ClientOptions {
@@ -53,12 +45,6 @@ func (this *ClientOptions) Merge(opts ...*ClientOptions) *ClientOptions {
 }
 
 func (this *ClientOptions) merge(opt *ClientOptions) {
-	if opt.Name != nil {
-		this.Name = opt.Name
-	}
-	if opt.CodecFunc != nil {
-		this.CodecFunc = opt.CodecFunc
-	}
 	if opt.CheckInterval != nil {
 		this.CheckInterval = opt.CheckInterval
 	}

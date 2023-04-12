@@ -37,10 +37,10 @@ type methodType struct {
 }
 
 type module struct {
-	name   string                 // name of service
-	rcvr   reflect.Value          // receiver of methods for the service
-	typ    reflect.Type           // type of the receiver
-	method map[string]*methodType // registered methods
+	name    string                 // name of service
+	rcvr    reflect.Value          // receiver of methods for the service
+	typ     reflect.Type           // type of the receiver
+	methods map[string]*methodType // registered methods
 }
 
 func (this *Client) register(rcvr any, name string, useName bool) error {
@@ -63,9 +63,9 @@ func (this *Client) register(rcvr any, name string, useName bool) error {
 	}
 	m.name = sname
 	// Install the methods
-	m.method = suitableMethods(m.typ, logRegisterError)
+	m.methods = suitableMethods(m.typ, logRegisterError)
 
-	if len(m.method) == 0 {
+	if len(m.methods) == 0 {
 		str := ""
 		// To help the user, see if a pointer receiver would work.
 		method := suitableMethods(reflect.PointerTo(m.typ), false)

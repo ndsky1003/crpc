@@ -3,6 +3,8 @@ package codec
 import "errors"
 
 var (
-	CompressorTypeMismatchError = errors.New("request and response Compressor type mismatch")
-	UnexpectedChecksumError     = errors.New("unexpected checksum")
+	CompressorTypeMismatchError = errors.New("codec request and response Compressor type mismatch")
+	UnexpectedChecksumError     = errors.New("codec unexpected checksum")
+	WriteError                  = errors.New("codec WriteError")
+	ReadError                   = errors.New("codec ReadError")
 )
