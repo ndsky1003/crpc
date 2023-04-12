@@ -42,10 +42,12 @@ func NewCodec(conn io.ReadWriteCloser, opts ...*options.CodecOptions) Codec {
 		panic("conn is nil")
 	}
 	var c = &codec{
-		conn: conn,
-		r:    bufio.NewReader(conn),
-		w:    bufio.NewWriter(conn),
-		c:    conn,
+		conn:         conn,
+		r:            bufio.NewReader(conn),
+		w:            bufio.NewWriter(conn),
+		c:            conn,
+		coderType:    coder.JSON,
+		compressType: compressor.Raw,
 	}
 	opt := options.CodecOptions{}
 	opt.Merge(opts...)

@@ -9,6 +9,7 @@ const (
 	Req
 	Reply_Success
 	Reply_Error
+	Msg //MQ
 
 	Res = Reply_Success | Reply_Error //最底部
 )

@@ -1,6 +1,7 @@
 package crpc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,9 +19,6 @@ import (
 	"github.com/ndsky1003/crpc/header"
 	"github.com/ndsky1003/crpc/header/headertype"
 	"github.com/ndsky1003/crpc/options"
-	"github.com/ndsky1003/event/codec"
-	"github.com/ndsky1003/event/msg"
-	"github.com/ndsky1003/event/options"
 	"github.com/sirupsen/logrus"
 )
 
@@ -31,6 +29,8 @@ type Client struct {
 	name          string
 	url           string
 	moduleMap     sync.Map // map[string]*module
+	coderType     coder.CoderType
+	compressType  compressor.CompressType
 	l             sync.Mutex
 	codecGenFunc  CodecFunc
 	codec         codec.Codec
@@ -38,24 +38,37 @@ type Client struct {
 	pending       map[uint64]*Call
 	checkInterval time.Duration //链接检测
 	heartInterval time.Duration //心跳间隔
+	timeout       time.Duration // 负数 不失效
 	isStopHeart   bool          //是否关闭心跳
 	connecting    bool          // client is connecting
 }
 
 func Dial(name, url string, opts ...*options.ClientOptions) *Client {
 	c := &Client{
-		name: name,
-		url:  url,
-		codecGenFunc: func(conn io.ReadWriteCloser) (codec.Codec, error) {
-			return codec.NewCodec(conn, options.Codec().SetCoderType(coder.JSON).SetCompressorType(compressor.Raw)), nil
-		},
+		name:          name,
+		url:           url,
 		pending:       make(map[uint64]*Call),
+		coderType:     coder.JSON,
+		compressType:  compressor.Raw,
 		checkInterval: 1,
 		heartInterval: 5,
+		timeout:       -1,
 	}
 	//合并属性
 	opt := options.Client().Merge(opts...)
 	//属性设置开始
+	if opt.CoderType != nil {
+		c.coderType = *opt.CoderType
+	}
+	if opt.CompressType != nil {
+		c.compressType = *opt.CompressType
+	}
+	c.codecGenFunc = func(conn io.ReadWriteCloser) (codec.Codec, error) {
+		return codec.NewCodec(conn, options.Codec().SetCoderType(c.coderType).SetCompressorType(c.compressType)), nil
+	}
+	if opt.Timeout != nil {
+		c.timeout = *opt.Timeout
+	}
 	if opt.CheckInterval != nil {
 		c.checkInterval = *opt.CheckInterval
 	}
@@ -80,7 +93,7 @@ func (this *Client) keepAlive() {
 			conn, err := net.Dial("tcp", this.url)
 
 			if err != nil {
-				logrus.Errorf("dail err:%v\n", err)
+				log.Printf("dail err:%v\n", err)
 				time.Sleep(this.checkInterval * time.Second)
 				continue
 			}
@@ -97,13 +110,12 @@ func (this *Client) keepAlive() {
 			}
 		} else { //heart
 			if !this.isStopHeart {
-				if call := this.SendMsg(msg.MsgType_ping, ""); call != nil {
-					err := call.Error
-					if err != nil { //这里是同步触发的错误
-						logrus.Error(err)
-						if errors.Is(err, io.ErrShortWrite) || errors.Is(err, errLocalWrite) {
-							this.stop(err)
-						}
+				h := header.Get()
+				h.Type = headertype.Ping
+				if err := this.send(h, nil); err != nil {
+					logrus.Error(err)
+					if errors.Is(err, io.ErrShortWrite) || errors.Is(err, WriteError) || errors.Is(err, codec.WriteError) {
+						this.stop(err)
 					}
 				}
 				time.Sleep(this.heartInterval * time.Second)
@@ -123,8 +135,7 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 	}()
 	h := header.Get()
 	h.Type = headertype.Verify
-	//TODO 想一个验证策略
-	if err = codec.Write(h, struct{ Pwd string }{Pwd: "jkaksdfj"}); err != nil {
+	if err = codec.Write(h, verify_req{Name: this.name, Pwd: "kasjfj"}); err != nil {
 		return
 	}
 	header.Release(h)
@@ -136,9 +147,7 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 		err = fmt.Errorf("%w,headertype:%d is invalid", VerifyError, h.Type)
 		return
 	}
-	res := struct {
-		Success bool
-	}{}
+	var res verify_res
 	if err = codec.ReadBody(&res); err != nil {
 		return
 	}
@@ -166,7 +175,7 @@ func (this *Client) stop(err error) {
 		this.codec = nil
 	}
 	this.seq = 0
-	this.pending = make(map[uint64]*msg.Call)
+	this.pending = make(map[uint64]*Call)
 	this.connecting = false
 }
 
@@ -177,35 +186,30 @@ func (this *Client) StopHeart() {
 }
 
 func (this *Client) PrintCall() {
-	for index, msg := range this.pending {
-		logrus.Infof("index:%d,msg:%+v\n", index, msg.Error)
+	for index, call := range this.pending {
+		logrus.Infof("index:%d,msg:%+v\n", index, call.Error)
 	}
 }
 
-func (this *Client) func_call(h *header.Header, reqData []byte) {
-	defer func() {
-		header.Release(h)
-	}()
-	var err error
-	if v, ok := this.moduleMap.Load(h.Module); !ok {
-		err = fmt.Errorf("%w,module:%s is not exist", FuncErr, h.Module)
+func (this *Client) func_call(mod, method string, reqData []byte) (ret any, err error) {
+	if v, ok := this.moduleMap.Load(mod); !ok {
+		err = fmt.Errorf("%w,module:%s is not exist", FuncError, mod)
 		return
 	} else {
-		if mtype, ok := v.(module).methods[h.Method]; !ok {
-			err = fmt.Errorf("%w,module:%s,method:%s is not exist", FuncErr, h.Module, h.Method)
+		mod := v.(module)
+		if mtype, ok := mod.methods[method]; !ok {
+			err = fmt.Errorf("%w,module:%s,method:%s is not exist", FuncError, mod, method)
 			return
 		} else {
 			var argv, replyv reflect.Value
-			// Decode the argument value.
-			argIsValue := false // if true, need to indirect before calling.
+			argIsValue := false
 			if mtype.ArgType.Kind() == reflect.Pointer {
 				argv = reflect.New(mtype.ArgType.Elem())
 			} else {
 				argv = reflect.New(mtype.ArgType)
 				argIsValue = true
 			}
-			// argv guaranteed to be a pointer now.
-			if err := this.Unmarshal(&reqData, argv.Interface()); err != nil {
+			if err = this.Unmarshal(&reqData, argv.Interface()); err != nil {
 				return
 			}
 			if argIsValue {
@@ -218,11 +222,17 @@ func (this *Client) func_call(h *header.Header, reqData []byte) {
 			case reflect.Slice:
 				replyv.Elem().Set(reflect.MakeSlice(mtype.ReplyType.Elem(), 0, 0))
 			}
-
-			//TODO call func
+			function := mtype.method.Func
+			returnValues := function.Call([]reflect.Value{mod.rcvr, argv, replyv})
+			errInter := returnValues[0].Interface()
+			if errInter != nil {
+				err = errInter.(error)
+			} else {
+				ret = replyv.Interface()
+			}
+			return
 		}
 	}
-
 }
 
 func (this *Client) input(codec codec.Codec) {
@@ -240,16 +250,48 @@ func (this *Client) input(codec codec.Codec) {
 				break
 			}
 			if h.Type == headertype.Ping {
-				//send_pong
+				go func() {
+					defer header.Release(h)
+					h.Type = headertype.Pong
+					if e := this.send(h, nil); e != nil {
+						log.Println(e)
+					}
+				}()
+			} else {
+				header.Release(h)
 			}
-
+		case headertype.Msg:
+			var data []byte
+			if err = this.codec.ReadBodyData(&data); err != nil {
+				err = fmt.Errorf("%w,%v", ReadError, err)
+				break
+			}
+			go func() {
+				defer header.Release(h)
+				if _, e := this.func_call(h.Module, h.Method, data); e != nil {
+					logrus.Error(e)
+				}
+			}()
 		case headertype.Req:
 			var data []byte
 			if err = this.codec.ReadBodyData(&data); err != nil {
 				err = fmt.Errorf("%w,%v", ReadError, err)
 				break
 			}
-			go this.func_call(h, data) //执行本地
+			go func() {
+				defer header.Release(h)
+				var v any
+				if ret, e := this.func_call(h.Module, h.Method, data); e != nil {
+					h.Type = headertype.Reply_Error
+					v = e
+				} else {
+					h.Type = headertype.Reply_Success
+					v = ret
+				}
+				if e := this.send(h, v); e != nil {
+					log.Println(e)
+				}
+			}()
 		case headertype.Reply_Success, headertype.Reply_Error: //响应
 			seq := h.Seq
 			this.l.Lock()
@@ -281,7 +323,7 @@ func (this *Client) input(codec codec.Codec) {
 			header.Release(h)
 		}
 	}
-	fmt.Println("read err:%+v", err)
+	logrus.Error("read err:%+v\n", err)
 	this.stop(err)
 }
 
@@ -301,9 +343,21 @@ func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string,
 }
 
 // 对外的方法 sync
-func (this *Client) Call(server string, moduleFunc string, req, ret any) error {
-	call := <-this.Go(server, moduleFunc, req, ret, make(chan *Call, 1)).Done
-	return call.Error
+func (this *Client) Call(ctx context.Context, server string, moduleFunc string, req, ret any) error {
+	if this.timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), this.timeout)
+		defer cancel()
+		call := this.Go(server, moduleFunc, req, ret, make(chan *Call, 1))
+		select {
+		case <-ctx.Done():
+			return ReqTimeOutError
+		case <-call.Done:
+			return call.Error
+		}
+	} else {
+		call := <-this.Go(server, moduleFunc, req, ret, make(chan *Call, 1)).Done
+		return call.Error
+	}
 }
 
 // async

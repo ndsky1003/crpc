@@ -1,60 +1,33 @@
 package crpc
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"sync"
-	"time"
 
-	"github.com/ndsky1003/event/codec"
-	"github.com/ndsky1003/event/msg"
-	"github.com/ndsky1003/event/options"
+	"github.com/ndsky1003/crpc/codec"
+	"github.com/ndsky1003/crpc/header"
+	"github.com/ndsky1003/crpc/options"
 	"github.com/sirupsen/logrus"
 )
 
 type server struct {
-	codecFunc options.CreateServerCodecFunc
-	mutex     sync.RWMutex
-	seq       uint64
-	monitor   map[*msg.EventTopic]map[uint64]struct{}
-	services  map[uint64]*module
-
-	reqTimeOut time.Duration //请求超时
-	reqSeq     uint64
-	reqMetas   map[uint64]*serverReqMeta
-}
-
-type serverReqMeta struct {
-	reqServerID    uint64
-	serverReqSeq   uint64
-	serverReqCount uint64
-	existErr       bool
-	errs           []string
-	Time           time.Time
-	//clien info
-	clientSeq uint64
-	msg.EventType
+	sync.RWMutex
+	services     map[string]*service
+	codecGenFunc CodecFunc
 }
 
 func NewServer(opts ...*options.ServerOptions) *server {
 	c := &server{
-		services:   map[uint64]*module{},
-		monitor:    map[*msg.EventTopic]map[uint64]struct{}{},
-		reqTimeOut: 10,
-		reqMetas:   map[uint64]*serverReqMeta{},
+		services: map[string]*service{},
 	}
-
-	opt := options.Server().SetCodecFunc(func(conn io.ReadWriteCloser) (codec.Codec, error) {
-		return codec.NewGobCodec(conn), nil
-	}).Merge(opts...)
-	if opt.CodecFunc != nil {
-		c.codecFunc = *opt.CodecFunc
+	//opt := options.Server().Merge(opts...)
+	//属性设置开始
+	c.codecGenFunc = func(conn io.ReadWriteCloser) (codec.Codec, error) {
+		return codec.NewCodec(conn), nil
 	}
-	if opt.ReqTimeout != nil {
-		c.reqTimeOut = *opt.ReqTimeout
-	}
-	go c.checkTimeOut()
 	return c
 }
 
@@ -90,18 +63,58 @@ func (this *server) listen(url string) {
 		if err != nil {
 			continue
 		}
-		codec, err := this.codecFunc(conn)
+		codec, err := this.codecGenFunc(conn)
 		if err != nil {
+			conn.Close()
 			logrus.Error(err)
 			continue
 		}
-		this.mutex.Lock()
-		seq := this.seq
-		seq = incSeqID(seq)
-		this.seq = seq
-		service := newService(this, seq, codec)
-		this.services[this.seq] = service
-		this.mutex.Unlock()
+		service := newService(this, codec)
 		go service.serve()
 	}
+}
+
+func (this *server) getService(name string) (*service, error) {
+	if name == "" {
+		return nil, errors.New("service name is empty")
+	}
+	this.Lock()
+	defer this.Unlock()
+	if s, ok := this.services[name]; !ok {
+		return nil, fmt.Errorf("service name:%s exist", name)
+	} else {
+		return s, nil
+	}
+}
+
+func (this *server) addService(name string, si *service) error {
+	if name == "" {
+		return errors.New("service name is empty")
+	}
+	this.Lock()
+	defer this.Unlock()
+	if _, ok := this.services[name]; !ok {
+		return fmt.Errorf("service name:%s exist", name)
+	}
+	this.services[name] = si
+	return nil
+}
+
+func (this *server) removeService(name string) error {
+	if name == "" {
+		return errors.New("service name is empty")
+	}
+	this.Lock()
+	defer this.Unlock()
+	delete(this.services, name)
+	return nil
+}
+
+func (this *server) WriteData(name string, h *header.Header, data []byte) error {
+	s, err := this.getService(name)
+	if err != nil {
+		return err
+	}
+	go s.WriteData(h, data)
+	return nil
 }

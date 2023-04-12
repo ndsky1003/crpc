@@ -8,5 +8,6 @@ var (
 	WriteError      = errors.New("Client WriteError")
 	ModuleFuncError = errors.New("Client ModuleFunc must like rpc.func")
 	ServerError     = errors.New("ServerError")
-	FuncErr         = errors.New("FuncErr")
+	FuncError       = errors.New("FuncError")
+	ReqTimeOutError = errors.New("ReqTimeoutError")
 )

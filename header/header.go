@@ -139,6 +139,9 @@ func (r *Header) GetCompressType() compressor.CompressType {
 	return r.CompressType
 }
 
+func (r *Header) Release() {
+	Release(r)
+}
 func (r *Header) Reset() {
 	r.Lock()
 	defer r.Unlock()
