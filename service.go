@@ -53,7 +53,6 @@ func (this *service) serve() {
 		return
 	}
 	logrus.Infof("req:%+v\n", req)
-	//TODO verify
 	if req.Secret != this.server.Secret {
 		h.Release()
 		logrus.Errorf("verify is error")

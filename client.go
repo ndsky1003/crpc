@@ -402,7 +402,22 @@ func (this *Client) Go(server string, moduleFunc string, req, ret any, done chan
 }
 
 // send msg 就是类似于MQ
-func (this *Client) Send(h *header.Header, v any) error {
+func (this *Client) Send(server, module, method string, v any) error {
+	if server == "" {
+		return errors.New("server is empty")
+	}
+	if module == "" {
+		return errors.New("module is empty")
+	}
+	if method == "" {
+		return errors.New("method is empty")
+	}
+	h := header.Get()
+	defer h.Release()
+	h.ToService = server
+	h.Type = headertype.Msg
+	h.Module = module
+	h.Method = method
 	return this.send(h, v)
 }
 
