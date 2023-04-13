@@ -52,9 +52,16 @@ func (this *service) serve() {
 		this.codec.Close()
 		return
 	}
+	logrus.Infof("req:%+v\n", req)
 	//TODO verify
-	//if success
+	if req.Secret != this.server.Secret {
+		h.Release()
+		logrus.Errorf("verify is error")
+		this.codec.Close()
+		return
+	}
 
+	this.name = req.Name
 	if err = this.server.addService(this.name, this); err != nil {
 		logrus.Errorf("add map is error:%v", err)
 		h.Release()
@@ -63,6 +70,7 @@ func (this *service) serve() {
 	}
 	this.mutex.Lock()
 	if err = this.codec.Write(h, verify_res{Success: true}); err != nil {
+		h.Release()
 		logrus.Errorf("write verify res is err :%v", err)
 		this.codec.Close()
 		return
@@ -72,17 +80,20 @@ func (this *service) serve() {
 	for err == nil {
 		h, e := this.codec.ReadHeader()
 		if e != nil {
-			h.Release()
 			err = e
+			logrus.Error(err)
 			continue
 		}
+		//logrus.Infof("header:%+v", h)
 		var data []byte
 		if err = this.codec.ReadBodyData(&data); err != nil {
 			h.Release()
 			continue
 		}
+		//logrus.Infof("data:%+v", data)
 		switch h.Type {
 		case headertype.Ping:
+			h.Type = headertype.Pong
 			go this.WriteData(h, data)
 		case headertype.Req, headertype.Msg: //forward
 			if e := this.server.WriteData(h.ToService, h, data); e != nil {

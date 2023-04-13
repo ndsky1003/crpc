@@ -22,17 +22,18 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type CodecFunc func(conn io.ReadWriteCloser) (codec.Codec, error)
+type codecFunc func(conn io.ReadWriteCloser) (codec.Codec, error)
 
 // service - module -> func
 type Client struct {
 	name          string
 	url           string
+	secret        string
 	moduleMap     sync.Map // map[string]*module
 	coderType     coder.CoderType
 	compressType  compressor.CompressType
 	l             sync.Mutex
-	codecGenFunc  CodecFunc
+	codecGenFunc  codecFunc
 	codec         codec.Codec
 	seq           uint64
 	pending       map[uint64]*Call
@@ -54,9 +55,15 @@ func Dial(name, url string, opts ...*options.ClientOptions) *Client {
 		heartInterval: 5,
 		timeout:       -1,
 	}
+	if name == "" {
+		panic("name is empty")
+	}
 	//合并属性
 	opt := options.Client().Merge(opts...)
 	//属性设置开始
+	if opt.Secret != nil {
+		c.secret = *opt.Secret
+	}
 	if opt.CoderType != nil {
 		c.coderType = *opt.CoderType
 	}
@@ -91,9 +98,8 @@ func (this *Client) keepAlive() {
 	for {
 		if !this.getConnecting() {
 			conn, err := net.Dial("tcp", this.url)
-
 			if err != nil {
-				log.Printf("dail err:%v\n", err)
+				logrus.Errorf("dail err:%v\n", err)
 				time.Sleep(this.checkInterval * time.Second)
 				continue
 			}
@@ -106,6 +112,7 @@ func (this *Client) keepAlive() {
 				if err := this.serve(codec); err != nil {
 					logrus.Error("server:", err)
 				}
+				time.Sleep(this.checkInterval * time.Second) //防止连上就断开，再继续连接
 				continue
 			}
 		} else { //heart
@@ -135,25 +142,30 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 	}()
 	h := header.Get()
 	h.Type = headertype.Verify
-	if err = codec.Write(h, verify_req{Name: this.name, Pwd: "kasjfj"}); err != nil {
+	if err = codec.Write(h, verify_req{Name: this.name, Secret: this.secret}); err != nil {
+		logrus.Error(err)
 		return
 	}
 	header.Release(h)
 	h, err = codec.ReadHeader()
 	if err != nil {
+		logrus.Error(err)
 		return err
 	}
-	if h.Type == headertype.Verify {
+	if h.Type != headertype.Verify {
 		err = fmt.Errorf("%w,headertype:%d is invalid", VerifyError, h.Type)
+		logrus.Error(err)
 		return
 	}
 	var res verify_res
 	if err = codec.ReadBody(&res); err != nil {
+		logrus.Error(err)
 		return
 	}
 	header.Release(h)
 	if !res.Success {
 		err = fmt.Errorf("%w,verify failed", VerifyError)
+		logrus.Error(err)
 		return
 	}
 	this.connecting = true
@@ -191,14 +203,14 @@ func (this *Client) PrintCall() {
 	}
 }
 
-func (this *Client) func_call(mod, method string, reqData []byte) (ret any, err error) {
-	if v, ok := this.moduleMap.Load(mod); !ok {
-		err = fmt.Errorf("%w,module:%s is not exist", FuncError, mod)
+func (this *Client) func_call(moduleStr, method string, reqData []byte) (ret any, err error) {
+	if v, ok := this.moduleMap.Load(moduleStr); !ok {
+		err = fmt.Errorf("%w,module:%s is not exist", FuncError, moduleStr)
 		return
 	} else {
-		mod := v.(module)
+		mod := v.(*module)
 		if mtype, ok := mod.methods[method]; !ok {
-			err = fmt.Errorf("%w,module:%s,method:%s is not exist", FuncError, mod, method)
+			err = fmt.Errorf("%w,module:%v,method:%v is not exist", FuncError, moduleStr, method)
 			return
 		} else {
 			var argv, replyv reflect.Value
@@ -209,7 +221,7 @@ func (this *Client) func_call(mod, method string, reqData []byte) (ret any, err 
 				argv = reflect.New(mtype.ArgType)
 				argIsValue = true
 			}
-			if err = this.Unmarshal(&reqData, argv.Interface()); err != nil {
+			if err = this.unmarshal(&reqData, argv.Interface()); err != nil {
 				return
 			}
 			if argIsValue {
@@ -243,6 +255,7 @@ func (this *Client) input(codec codec.Codec) {
 			err = fmt.Errorf("%w,%v", ReadError, err)
 			break
 		}
+		//logrus.Infof("receiveHeader:%+v", h)
 		switch h.Type {
 		case headertype.Ping, headertype.Pong:
 			if err = this.codec.ReadBodyData(nil); err != nil {
@@ -333,7 +346,7 @@ func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string,
 		return
 	}
 	modulefuncs := strings.Split(moduleFunc, ".")
-	if len(module) != 2 {
+	if len(modulefuncs) != 2 {
 		err = ModuleFuncError
 		return
 	}
@@ -343,9 +356,9 @@ func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string,
 }
 
 // 对外的方法 sync
-func (this *Client) Call(ctx context.Context, server string, moduleFunc string, req, ret any) error {
+func (this *Client) Call(server string, moduleFunc string, req, ret any) error {
 	if this.timeout > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), this.timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), this.timeout*time.Second)
 		defer cancel()
 		call := this.Go(server, moduleFunc, req, ret, make(chan *Call, 1))
 		select {
@@ -373,16 +386,14 @@ func (this *Client) Go(server string, moduleFunc string, req, ret any, done chan
 	call.Done = done
 	call.Req = req
 	call.Ret = ret
-	var err error
 	if server == "" {
-		err = fmt.Errorf("server is emtpty")
-		call.Service = server
-		call.Error = err
+		call.Error = fmt.Errorf("server is emtpty")
 		call.done()
 		return call
 	}
+	call.Service = server
 	call.Module, call.Method, call.Error = this.parseMoudleFunc(moduleFunc)
-	if err != nil {
+	if call.Error != nil {
 		call.done()
 		return call
 	}
@@ -410,14 +421,14 @@ func (this *Client) send(h *header.Header, v any) (err error) {
 	return
 }
 
-func (this *Client) Marshal(v any) ([]byte, error) {
+func (this *Client) marshal(v any) ([]byte, error) {
 	this.l.Lock()
 	defer this.l.Unlock()
 	return this.codec.Marshal(v)
 }
 
-func (this *Client) Unmarshal(data *[]byte, v any) error {
-	this.l.Unlock()
+func (this *Client) unmarshal(data *[]byte, v any) error {
+	this.l.Lock()
 	defer this.l.Unlock()
 	return this.codec.Unmarshal(data, v)
 }
@@ -430,12 +441,15 @@ func (this *Client) sendCall(call *Call) {
 	atomic.AddUint64(&this.seq, 1)
 	seq := this.seq
 	this.pending[seq] = call
-	defer this.l.Unlock()
+	this.l.Unlock()
 	h := header.Get()
 	defer func() {
 		header.Release(h)
 	}()
+	//logrus.Infof("call:%+v", call)
 	h.Init(headertype.Req, this.name, call.Service, call.Module, call.Method, seq)
+
+	//logrus.Infof("header:%+v", h)
 	if err := this.send(h, call.Req); err != nil {
 		this.l.Lock()
 		call = this.pending[seq]

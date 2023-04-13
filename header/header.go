@@ -94,7 +94,7 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 		}
 	}()
 	idx, size := 0, 0
-	r.Type = binary.LittleEndian.Uint16(data[idx:])
+	r.Type = headertype.Type(binary.LittleEndian.Uint16(data[idx:]))
 	idx += Uint16Size
 
 	r.CoderType = coder.CoderType(binary.LittleEndian.Uint16(data[idx:]))

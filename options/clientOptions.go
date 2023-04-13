@@ -2,18 +2,48 @@ package options
 
 import (
 	"time"
+
+	"github.com/ndsky1003/crpc/coder"
+	"github.com/ndsky1003/crpc/compressor"
 )
 
 type ClientOptions struct {
-	CodecOptions
+	CoderType    *coder.CoderType
+	CompressType *compressor.CompressType
+
 	Timeout       *time.Duration
 	CheckInterval *time.Duration
 	HeartInterval *time.Duration
 	IsStopHeart   *bool
+	Secret        *string
 }
 
 func Client() *ClientOptions {
 	return new(ClientOptions)
+}
+
+func (this *ClientOptions) SetSecret(s string) *ClientOptions {
+	if this == nil {
+		return this
+	}
+	this.Secret = &s
+	return this
+}
+
+func (this *ClientOptions) SetCoderType(t coder.CoderType) *ClientOptions {
+	if this == nil {
+		return this
+	}
+	this.CoderType = &t
+	return this
+}
+
+func (this *ClientOptions) SetCompressorType(t compressor.CompressType) *ClientOptions {
+	if this == nil {
+		return this
+	}
+	this.CompressType = &t
+	return this
 }
 
 func (this *ClientOptions) SetTimeout(t time.Duration) *ClientOptions {
@@ -55,7 +85,15 @@ func (this *ClientOptions) Merge(opts ...*ClientOptions) *ClientOptions {
 }
 
 func (this *ClientOptions) merge(opt *ClientOptions) {
-	this.CodecOptions.merge(&opt.CodecOptions)
+	if opt.CoderType != nil {
+		this.CoderType = opt.CoderType
+	}
+	if opt.CompressType != nil {
+		this.CompressType = opt.CompressType
+	}
+	if opt.Secret != nil {
+		this.Secret = opt.Secret
+	}
 	if opt.Timeout != nil {
 		this.Timeout = opt.Timeout
 	}

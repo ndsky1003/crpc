@@ -16,15 +16,19 @@ import (
 type server struct {
 	sync.RWMutex
 	services     map[string]*service
-	codecGenFunc CodecFunc
+	Secret       string
+	codecGenFunc codecFunc
 }
 
 func NewServer(opts ...*options.ServerOptions) *server {
 	c := &server{
 		services: map[string]*service{},
 	}
-	//opt := options.Server().Merge(opts...)
+	opt := options.Server().Merge(opts...)
 	//属性设置开始
+	if opt.Secret != nil {
+		c.Secret = *opt.Secret
+	}
 	c.codecGenFunc = func(conn io.ReadWriteCloser) (codec.Codec, error) {
 		return codec.NewCodec(conn), nil
 	}
@@ -80,10 +84,10 @@ func (this *server) getService(name string) (*service, error) {
 	}
 	this.Lock()
 	defer this.Unlock()
-	if s, ok := this.services[name]; !ok {
-		return nil, fmt.Errorf("service name:%s exist", name)
-	} else {
+	if s, ok := this.services[name]; ok {
 		return s, nil
+	} else {
+		return nil, fmt.Errorf("service name:%s not exist", name)
 	}
 }
 
@@ -93,7 +97,7 @@ func (this *server) addService(name string, si *service) error {
 	}
 	this.Lock()
 	defer this.Unlock()
-	if _, ok := this.services[name]; !ok {
+	if _, ok := this.services[name]; ok {
 		return fmt.Errorf("service name:%s exist", name)
 	}
 	this.services[name] = si
