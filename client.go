@@ -58,6 +58,10 @@ func Dial(name, url string, opts ...*options.ClientOptions) *Client {
 	if name == "" {
 		panic("name is empty")
 	}
+	if url == "" {
+		panic("url is empty")
+	}
+
 	//合并属性
 	opt := options.Client().Merge(opts...)
 	//属性设置开始

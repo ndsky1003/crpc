@@ -101,6 +101,7 @@ func (this *server) addService(name string, si *service) error {
 		return fmt.Errorf("service name:%s exist", name)
 	}
 	this.services[name] = si
+	logrus.Info("add service:", name)
 	return nil
 }
 
