@@ -26,6 +26,7 @@ type codecFunc func(conn io.ReadWriteCloser) (codec.Codec, error)
 
 // service - module -> func
 type Client struct {
+	version       uint32 //问题自身产生的caller，被别的版本caller消费
 	name          string
 	url           string
 	secret        string
@@ -46,6 +47,7 @@ type Client struct {
 
 func Dial(name, url string, opts ...*options.ClientOptions) *Client {
 	c := &Client{
+		version:       uint32(time.Now().Unix()),
 		name:          name,
 		url:           url,
 		pending:       make(map[uint64]*Call),
@@ -122,7 +124,7 @@ func (this *Client) keepAlive() {
 		} else { //heart
 			if !this.isStopHeart {
 				h := header.Get()
-				h.Type = headertype.Ping
+				h.InitVersionType(this.version, headertype.Ping)
 				if err := this.send(h, nil); err != nil {
 					logrus.Error(err)
 					if errors.Is(err, io.ErrShortWrite) || errors.Is(err, WriteError) || errors.Is(err, codec.WriteError) {
@@ -145,7 +147,7 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 		}
 	}()
 	h := header.Get()
-	h.Type = headertype.Verify
+	h.InitVersionType(this.version, headertype.Verify)
 	if err = codec.Write(h, verify_req{Name: this.name, Secret: this.secret}); err != nil {
 		logrus.Error(err)
 		return
@@ -311,10 +313,13 @@ func (this *Client) input(codec codec.Codec) {
 			}()
 		case headertype.Reply_Success, headertype.Reply_Error: //响应
 			seq := h.Seq
-			this.l.Lock()
-			call := this.pending[seq]
-			delete(this.pending, seq)
-			this.l.Unlock()
+			var call *Call
+			if this.version == h.Version {
+				this.l.Lock()
+				call = this.pending[seq]
+				delete(this.pending, seq)
+				this.l.Unlock()
+			}
 			switch {
 			case call == nil:
 				err = this.codec.ReadBody(nil)
@@ -340,7 +345,7 @@ func (this *Client) input(codec codec.Codec) {
 			header.Release(h)
 		}
 	}
-	logrus.Error("read err:%+v\n", err)
+	logrus.Errorf("read err:%+v\n", err)
 	this.stop(err)
 }
 
@@ -417,11 +422,8 @@ func (this *Client) Send(server, module, method string, v any) error {
 		return errors.New("method is empty")
 	}
 	h := header.Get()
+	h.InitData(this.version, headertype.Msg, "", server, module, method, 0)
 	defer h.Release()
-	h.ToService = server
-	h.Type = headertype.Msg
-	h.Module = module
-	h.Method = method
 	return this.send(h, v)
 }
 
@@ -466,7 +468,7 @@ func (this *Client) sendCall(call *Call) {
 		header.Release(h)
 	}()
 	//logrus.Infof("call:%+v", call)
-	h.Init(headertype.Req, this.name, call.Service, call.Module, call.Method, seq)
+	h.InitData(this.version, headertype.Req, this.name, call.Service, call.Module, call.Method, seq)
 
 	//logrus.Infof("header:%+v", h)
 	if err := this.send(h, call.Req); err != nil {

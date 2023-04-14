@@ -36,7 +36,7 @@ func (this *service) serve() {
 	if err != nil {
 		h.Release()
 		this.codec.Close()
-		logrus.Error("first frame header is error:%v", err)
+		logrus.Errorf("first frame header is error:%+v", err)
 		return
 	}
 	if h.Type != headertype.Verify {
@@ -52,7 +52,6 @@ func (this *service) serve() {
 		this.codec.Close()
 		return
 	}
-	logrus.Infof("req:%+v\n", req)
 	if req.Secret != this.server.Secret {
 		h.Release()
 		logrus.Errorf("verify is error")

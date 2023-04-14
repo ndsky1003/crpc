@@ -9,13 +9,13 @@ const (
 	Req
 	Reply_Success
 	Reply_Error
-	Msg //MQ
+	Msg    //MQ
+	Chunks //发送文件的时候
 
 	Res = Reply_Success | Reply_Error //最底部
 )
 
 var m = map[Type]string{
-
 	Ping:          "Ping",
 	Pong:          "Pong",
 	Verify:        "Verify",
@@ -24,6 +24,7 @@ var m = map[Type]string{
 	Reply_Error:   "Reply_Error",
 	Msg:           "Msg",
 	Res:           "Res",
+	Chunks:        "Chunks",
 }
 
 func (this Type) String() string {
