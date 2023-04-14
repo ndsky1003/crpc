@@ -18,6 +18,9 @@ func Get() *Header {
 }
 
 func Release(h *Header) {
+	if h == nil {
+		return
+	}
 	h.Reset()
 	pool.Put(h)
 }
