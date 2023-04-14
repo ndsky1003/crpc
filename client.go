@@ -24,6 +24,8 @@ import (
 
 type codecFunc func(conn io.ReadWriteCloser) (codec.Codec, error)
 
+const defaultChunksSize = 1 * 1024 * 1024 //1M 不涉及上传文件，大多都是图片，所以限制1M合理，具体项目自定义
+
 // service - module -> func
 type Client struct {
 	version       uint32 //问题自身产生的caller，被别的版本caller消费
@@ -33,6 +35,7 @@ type Client struct {
 	moduleMap     sync.Map // map[string]*module
 	coderType     coder.CoderType
 	compressType  compressor.CompressType
+	chunksSize    int
 	l             sync.Mutex
 	codecGenFunc  codecFunc
 	codec         codec.Codec
@@ -50,6 +53,7 @@ func Dial(name, url string, opts ...*options.ClientOptions) *Client {
 		version:       uint32(time.Now().Unix()),
 		name:          name,
 		url:           url,
+		chunksSize:    defaultChunksSize,
 		pending:       make(map[uint64]*Call),
 		coderType:     coder.JSON,
 		compressType:  compressor.Raw,
@@ -85,6 +89,11 @@ func Dial(name, url string, opts ...*options.ClientOptions) *Client {
 	if opt.CheckInterval != nil {
 		c.checkInterval = *opt.CheckInterval
 	}
+
+	if opt.ChunksSize != nil {
+		c.chunksSize = *opt.ChunksSize
+	}
+
 	if opt.HeartInterval != nil {
 		c.heartInterval = *opt.HeartInterval
 	}
@@ -367,8 +376,12 @@ func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string,
 
 // 对外的方法 sync
 func (this *Client) Call(server string, moduleFunc string, req, ret any) error {
-	if this.timeout > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), this.timeout*time.Second)
+	return this.call(headertype.Req, this.timeout, server, moduleFunc, req, ret)
+}
+
+func (this *Client) call(ht headertype.Type, timeout time.Duration, server string, moduleFunc string, req, ret any) error {
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
 		defer cancel()
 		call := this.Go(server, moduleFunc, req, ret, make(chan *Call, 1))
 		select {
@@ -383,9 +396,47 @@ func (this *Client) Call(server string, moduleFunc string, req, ret any) error {
 	}
 }
 
+func (this *Client) SendFile(server string, moduleFunc string, filename string, reader io.Reader) error {
+	if filename == "" {
+		return errors.New("filename not empty")
+	}
+
+	if filename[0] == '/' {
+		return errors.New("filename must relative path")
+	}
+
+	data := make([]byte, this.chunksSize)
+	var chunkIndex uint16 = 0
+	for {
+		n, err := reader.Read(data)
+		if err != nil {
+			return err
+		}
+		filebody := header.FileBody{
+			ChunksIndex: chunkIndex,
+			Filename:    filename,
+			Data:        data[:n],
+		}
+		if err := this.call(headertype.Chunks, 60*60*2, server, moduleFunc, filebody, nil); err != nil {
+			return err
+		}
+		if n < this.chunksSize {
+			return nil
+		}
+		chunkIndex++
+	}
+}
+
 // async
 func (this *Client) Go(server string, moduleFunc string, req, ret any, done chan *Call) *Call {
-	call := new(Call)
+	return this._go(headertype.Req, server, moduleFunc, req, ret, done)
+}
+
+func (this *Client) _go(ht headertype.Type, server string, moduleFunc string, req, ret any, done chan *Call) *Call {
+	call := &Call{
+		HeaderType: ht,
+	}
+
 	if done == nil {
 		done = make(chan *Call, 10) // buffered.
 	} else {
@@ -469,7 +520,7 @@ func (this *Client) sendCall(call *Call) {
 		header.Release(h)
 	}()
 	//logrus.Infof("call:%+v", call)
-	h.InitData(this.version, headertype.Req, this.name, call.Service, call.Module, call.Method, seq)
+	h.InitData(this.version, call.HeaderType, this.name, call.Service, call.Module, call.Method, seq)
 
 	//logrus.Infof("header:%+v", h)
 	if err := this.send(h, call.Req); err != nil {

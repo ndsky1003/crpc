@@ -14,6 +14,7 @@ type ClientOptions struct {
 	Timeout       *time.Duration
 	CheckInterval *time.Duration
 	HeartInterval *time.Duration
+	ChunksSize    *int
 	IsStopHeart   *bool
 	Secret        *string
 }
@@ -61,6 +62,15 @@ func (this *ClientOptions) SetCheckInterval(t time.Duration) *ClientOptions {
 	this.CheckInterval = &t
 	return this
 }
+
+func (this *ClientOptions) SetChunksMaxSize(t int) *ClientOptions {
+	if this == nil {
+		return this
+	}
+	this.ChunksSize = &t
+	return this
+}
+
 func (this *ClientOptions) SetHeartInterval(t time.Duration) *ClientOptions {
 	if this == nil {
 		return this
@@ -99,6 +109,9 @@ func (this *ClientOptions) merge(opt *ClientOptions) {
 	}
 	if opt.CheckInterval != nil {
 		this.CheckInterval = opt.CheckInterval
+	}
+	if opt.ChunksSize != nil {
+		this.ChunksSize = opt.ChunksSize
 	}
 	if opt.HeartInterval != nil {
 		this.HeartInterval = opt.HeartInterval

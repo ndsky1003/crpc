@@ -186,3 +186,48 @@ func writeString(data []byte, str string) int {
 	idx += len(str)
 	return idx
 }
+
+type FileBody struct {
+	ChunksIndex uint16 // 65525个
+	Filename    string //存储路径
+	Data        []byte
+}
+
+// Marshal will encode request header into a byte slice
+
+// 10 + 10
+const MaxFileBodySize = 12
+
+func (r *FileBody) Marshal() []byte {
+	idx := 0
+	body := make([]byte, MaxFileBodySize+len(r.Filename)+len(r.Data))
+
+	binary.LittleEndian.PutUint16(body[idx:], r.ChunksIndex)
+	idx += Uint16Size
+
+	idx += writeString(body[idx:], r.Filename)
+
+	copy(body[idx:], r.Data)
+	idx += len(r.Data)
+	return body[:idx]
+}
+
+// Unmarshal will decode request header into a byte slice
+func (r *FileBody) Unmarshal(data []byte) (err error) {
+	if len(data) == 0 {
+		return UnmarshalError
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = UnmarshalError
+		}
+	}()
+	idx, size := 0, 0
+	r.ChunksIndex = binary.LittleEndian.Uint16(data[idx:])
+	idx += Uint16Size
+	r.Data = data[idx:]
+	r.Filename, size = readString(data[idx:])
+	idx += size
+	return
+}

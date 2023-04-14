@@ -32,21 +32,17 @@ func TestReqHeader_Marshal(t *testing.T) {
 	t.Logf("%+v", h1)
 }
 
-//func TestResHeader_Marshal(t *testing.T) {
-//h := &ResponseHeader{
-//Type:         headertype.Res,
-//CoderType:    coder.MsgPack,
-//CompressType: compressor.Snappy,
-//ToService:    "gateway",
-//Error:        "error",
-//Seq:          1,
-//BodyLen:      100,
-//Checksum:     12834,
-//}
-//data := h.Marshal()
-//t.Log(data)
-//t.Error(1)
-//h1 := GetResponse()
-//h1.Unmarshal(data)
-//t.Logf("%+v", h1)
-//}
+func TestBody_Marshal(t *testing.T) {
+	h := &FileBody{
+		ChunksIndex: 65535,
+		Filename:    "config/img/cc.png",
+		Data:        []byte(" I am a png"),
+	}
+
+	data := h.Marshal()
+	t.Log(data)
+	t.Error(1)
+	h1 := new(FileBody)
+	h1.Unmarshal(data)
+	t.Logf("%+v", h1)
+}
