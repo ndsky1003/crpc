@@ -302,13 +302,14 @@ func (this *Client) input(codec codec.Codec) {
 				var v any
 				if ret, e := this.func_call(h.Module, h.Method, data); e != nil {
 					h.Type = headertype.Reply_Error
-					v = e
+					v = e.Error()
 				} else {
 					h.Type = headertype.Reply_Success
 					v = ret
 				}
+				//logrus.Infof("req reply:%+v,%v\n", h, v)
 				if e := this.send(h, v); e != nil {
-					log.Println(e)
+					logrus.Error(e)
 				}
 			}()
 		case headertype.Reply_Success, headertype.Reply_Error: //响应
@@ -330,7 +331,7 @@ func (this *Client) input(codec codec.Codec) {
 				var errStr string
 				if err := this.codec.ReadBody(&errStr); err != nil {
 					err = errors.New("reading error body: " + err.Error())
-					call.Error = fmt.Errorf("%w,err:%v", ServerError, err)
+					call.Error = fmt.Errorf("%w,header:%+v  err:%v", ServerError, h, err)
 				} else {
 					call.Error = fmt.Errorf("%w,err:%v", ServerError, errStr)
 				}

@@ -15,12 +15,17 @@ import (
 
 // 编解码器
 type Codec interface {
-	Write(*header.Header, any) error
+	Write(*header.Header, any) error //写任意解码器支持的对象
 	WriteData(*header.Header, []byte) error
+	WriteRawData(*header.Header, []byte) error //服务器转发或者，发送文件 不需要数据处理
+
 	ReadHeader() (*header.Header, error)
 	ReadBody(any) error
 	ReadBodyData(*[]byte) error
+	ReadBodyRawData(*[]byte) error //服务器转发或者，发送文件 不需要数据处理
+
 	Close() error
+
 	Marshal(any) ([]byte, error)
 	Unmarshal(*[]byte, any) error
 }
@@ -64,14 +69,13 @@ func NewCodec(conn io.ReadWriteCloser, opts ...*options.CodecOptions) Codec {
 	return c
 }
 
-// FIXME 服务器转发使用
 func (this *codec) WriteData(h *header.Header, data []byte) (err error) {
 	h.CoderType = this.coderType
 	h.CompressType = this.compressType
 	var headerData, bodyData []byte
 	defer func() {
 		if err != nil && this.Serializer != nil {
-			if e := this.Serialize(headerData, bodyData); e != nil {
+			if e := this.Serialize(h, bodyData); e != nil {
 				fmt.Println(e, headerData, bodyData)
 			}
 		}
@@ -86,8 +90,12 @@ func (this *codec) WriteData(h *header.Header, data []byte) (err error) {
 	}
 	h.Checksum = crc32.ChecksumIEEE(bodyData)
 	h.BodyLen = uint64(len(bodyData))
-	headerData = h.Marshal()
-	if err = sendFrame(this.w, headerData); err != nil {
+	return this.WriteRawData(h, bodyData)
+}
+
+// MARK 服务器转发使用
+func (this *codec) WriteRawData(h *header.Header, bodyData []byte) (err error) {
+	if err = sendFrame(this.w, h.Marshal()); err != nil {
 		err = fmt.Errorf("%w,%v", WriteError, err)
 		return
 	}
@@ -129,12 +137,22 @@ func (this *codec) ReadHeader() (*header.Header, error) {
 	return this.h, nil
 }
 
-// FIXME server读使用
-func (this *codec) ReadBodyData(data *[]byte) (err error) {
+func (this *codec) ReadBodyRawData(data *[]byte) (err error) {
 	bodyLen := this.h.BodyLen
 	body := make([]byte, bodyLen)
 	if err = read(this.r, body); err != nil {
 		err = fmt.Errorf("%w,err:%v", ReadError, err)
+		return
+	}
+	if data != nil {
+		*data = body
+	}
+	return
+}
+
+func (this *codec) ReadBodyData(data *[]byte) (err error) {
+	var body []byte
+	if err = this.ReadBodyRawData(&body); err != nil {
 		return
 	}
 	if data == nil {
@@ -158,6 +176,21 @@ func (this *codec) ReadBodyData(data *[]byte) (err error) {
 	return
 }
 
+func (this *codec) ReadBody(v any) (err error) {
+	if v == nil {
+		if err = this.ReadBodyData(nil); err != nil {
+			return
+		}
+	} else {
+		var data []byte
+		if err = this.ReadBodyData(&data); err != nil {
+			return
+		}
+		err = this.Unmarshal(&data, v)
+	}
+	return
+}
+
 func (this *codec) Marshal(v any) (data []byte, err error) {
 	coder, ok := coder.Coders[this.h.CoderType]
 	if !ok {
@@ -166,7 +199,7 @@ func (this *codec) Marshal(v any) (data []byte, err error) {
 	}
 	data, err = coder.Marshal(v)
 	if err != nil {
-		err = fmt.Errorf("%w,coder marshal err:%v", WriteError, err)
+		err = fmt.Errorf("%w,coder:%d marshal err:%v", WriteError, this.h.CoderType, err)
 	}
 	return
 }
@@ -183,21 +216,6 @@ func (this *codec) Unmarshal(data *[]byte, v any) error {
 		return fmt.Errorf("%w,coder unmarshal err:%v", ReadError, err)
 	}
 	return nil
-}
-
-func (this *codec) ReadBody(v any) (err error) {
-	if v == nil {
-		if err = this.ReadBodyData(nil); err != nil {
-			return
-		}
-	} else {
-		var data []byte
-		if err = this.ReadBodyData(&data); err != nil {
-			return
-		}
-		err = this.Unmarshal(&data, v)
-	}
-	return
 }
 
 func (this *codec) Close() error {

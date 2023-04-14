@@ -79,12 +79,11 @@ func (this *service) serve() {
 		h, e := this.codec.ReadHeader()
 		if e != nil {
 			err = e
-			logrus.Error(err)
 			continue
 		}
 		//logrus.Infof("header:%+v", h)
 		var data []byte
-		if err = this.codec.ReadBodyData(&data); err != nil {
+		if err = this.codec.ReadBodyRawData(&data); err != nil {
 			h.Release()
 			continue
 		}
@@ -92,15 +91,15 @@ func (this *service) serve() {
 		switch h.Type {
 		case headertype.Ping:
 			h.Type = headertype.Pong
-			go this.WriteData(h, data)
+			go this.WriteRawData(h, data)
 		case headertype.Req, headertype.Msg: //forward
-			if e := this.server.WriteData(h.ToService, h, data); e != nil {
+			if e := this.server.WriteRawData(h.ToService, h, data); e != nil {
 				logrus.Error(e)
 				h.Type = headertype.Reply_Error
 				go this.Write(h, e.Error())
 			}
 		case headertype.Reply_Success, headertype.Reply_Error: //back forward
-			if e := this.server.WriteData(h.FromService, h, data); e != nil {
+			if e := this.server.WriteRawData(h.FromService, h, data); e != nil {
 				logrus.Error(e)
 			}
 		default: //pong
@@ -115,11 +114,11 @@ func (this *service) close() error {
 	return this.codec.Close()
 }
 
-func (this *service) WriteData(h *header.Header, data []byte) error {
+func (this *service) WriteRawData(h *header.Header, data []byte) error {
 	defer h.Release()
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
-	return this.codec.WriteData(h, data)
+	return this.codec.WriteRawData(h, data)
 }
 func (this *service) Write(h *header.Header, v any) error {
 	defer h.Release()

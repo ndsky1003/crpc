@@ -6,14 +6,14 @@
 > 	number,string,bool,slice, map *point 测试通过
 
 2. coder.MsgPack
-> 未测试
+> number,string,bool,slice, map *point 测试通过
 
 
 >自定义解码器的时候优先要测试需要支持的类型
 
 
 #### 数据压缩
-> 暂未测试
+> Raw,Snappy 测试通过
 
 
 #### usage
@@ -49,5 +49,32 @@ if err := client2.Call("client1", "rpc.GetName", map[string]*Data{"0": {Name: "d
 }
 time.Sleep(1e9)
 fmt.Printf("done:result:%+v", s)
+```
+
+#### Benchmark
+```bash
+➜  crpc git:(main) ✗ go test -v -run ^$ -bench Call$ -benchmem
+ERRO[0000]/Users/mac/go/workSpace/self-pkg/crpc/client.go:108 github.com/ndsky1003/crpc.(*Client).keepAlive() dail err:dial tcp 127.0.0.1:8081: connect: connection refused
+INFO[0001]/Users/mac/go/workSpace/self-pkg/crpc/server.go:104 github.com/ndsky1003/crpc.(*server).addService() add service:client
+goos: darwin
+goarch: amd64
+pkg: github.com/ndsky1003/crpc
+cpu: 12th Gen Intel(R) Core(TM) i5-12400
+Benchmark_Call
+INFO[0002]/Users/mac/go/workSpace/self-pkg/crpc/server.go:104 github.com/ndsky1003/crpc.(*server).addService() add service:client2
+Benchmark_Call/1
+Benchmark_Call/1-12  	1000000000	         0.0001096 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Call/2
+Benchmark_Call/2-12  	1000000000	         0.0001179 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Call/3
+Benchmark_Call/3-12  	1000000000	         0.0000847 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Call/4
+Benchmark_Call/4-12  	1000000000	         0.0000895 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Call/5
+Benchmark_Call/5-12  	1000000000	         0.0000724 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Call/6
+Benchmark_Call/6-12  	1000000000	         0.0000890 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/ndsky1003/crpc	3.025s
 ```
 

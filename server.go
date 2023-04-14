@@ -115,11 +115,14 @@ func (this *server) removeService(name string) error {
 	return nil
 }
 
-func (this *server) WriteData(name string, h *header.Header, data []byte) error {
+func (this *server) WriteRawData(name string, h *header.Header, data []byte) error {
 	s, err := this.getService(name)
 	if err != nil {
 		return err
 	}
-	go s.WriteData(h, data)
+	//if h.Type == headertype.Req {
+	//logrus.Infof("forward:header:%+v,data:%+v\n", h, data)
+	//}
+	go s.WriteRawData(h, data)
 	return nil
 }
