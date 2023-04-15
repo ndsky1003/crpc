@@ -1,4 +1,4 @@
-module github.com/ndsky1003/crpc/v1
+module github.com/ndsky1003/crpc
 
 go 1.20
 
