@@ -51,6 +51,47 @@ time.Sleep(1e9)
 fmt.Printf("done:result:%+v", s)
 ```
 
+
+#### 文件发送
+>维护好chunksize就可以支持断点续传
+client1.go
+```go
+	client := crpc.Dial("client", "127.0.0.1:8080", options.Client().SetIsStopHeart(true).SetChunksMaxSize(50*1024*1024))
+	time.Sleep(1e9)
+	f, err := os.Open("ccc/鲸落.mp4")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if err := client.SendFile("client1", "rpc.SaveFile", "img/鲸落.mp4", f); err != nil {
+		logrus.Error(err)
+	}
+	logrus.Info("done")
+```
+client2.go
+```go
+func main() {
+	client1 := crpc.Dial("client1", "127.0.0.1:8080", options.Client().SetIsStopHeart(true))
+	client1.RegisterName("rpc", new(o))
+	time.Sleep(1e9)
+	select {}
+}
+type o struct {
+}
+func (*o) SaveFile(req dto.FileBody, _ *int) error {
+	f, err := comm.GetWriteFile(req.ChunksIndex, req.Filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(req.Data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+```
+
 #### Benchmark
 ```bash
 ➜  crpc git:(main) ✗ go test -v -run ^$ -bench Call$ -benchmem

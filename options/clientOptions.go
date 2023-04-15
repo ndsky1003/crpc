@@ -5,11 +5,13 @@ import (
 
 	"github.com/ndsky1003/crpc/coder"
 	"github.com/ndsky1003/crpc/compressor"
+	"github.com/ndsky1003/crpc/serializer"
 )
 
 type ClientOptions struct {
 	CoderType    *coder.CoderType
 	CompressType *compressor.CompressType
+	serializer.Serializer
 
 	Timeout       *time.Duration
 	CheckInterval *time.Duration
@@ -44,6 +46,11 @@ func (this *ClientOptions) SetCompressorType(t compressor.CompressType) *ClientO
 		return this
 	}
 	this.CompressType = &t
+	return this
+}
+
+func (this *ClientOptions) SetSerializer(s serializer.Serializer) *ClientOptions {
+	this.Serializer = s
 	return this
 }
 
@@ -118,5 +125,8 @@ func (this *ClientOptions) merge(opt *ClientOptions) {
 	}
 	if opt.IsStopHeart != nil {
 		this.IsStopHeart = opt.IsStopHeart
+	}
+	if opt.Serializer != nil {
+		this.Serializer = opt.Serializer
 	}
 }

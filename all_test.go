@@ -3,6 +3,7 @@ package crpc
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -72,13 +73,15 @@ func Test_Call(t *testing.T) {
 		a      any
 		r      any
 	}
+	var a int8 = 120
+	var _ float64 = 120 //手动修改，因为不同额coder处理数据的默认类型不一致，但是最终结果是一致的
 	tests := []args{
 		{
 			name:   "1",
 			server: "client",
 			method: "rpc.CallInt",
 			a:      12,
-			r:      120.0, //json无整数
+			r:      a, //json无整数
 		},
 		{
 			name:   "2",
@@ -122,6 +125,7 @@ func Test_Call(t *testing.T) {
 			if err := client1.Call(tt.server, tt.method, tt.a, &ret); err != nil {
 				t.Error(err)
 			} else if tt.r != ret {
+				t.Logf("v:%+v", reflect.TypeOf(ret))
 				t.Errorf("return value:%v,expect value:%v", ret, tt.r)
 			}
 		})
@@ -138,13 +142,14 @@ func Benchmark_Call(b *testing.B) {
 		a      any
 		r      any
 	}
+	var a int8 = 120
 	tests := []args{
 		{
 			name:   "1",
 			server: "client",
 			method: "rpc.CallInt",
 			a:      12,
-			r:      120.0, //json无整数
+			r:      a,
 		},
 		{
 			name:   "2",

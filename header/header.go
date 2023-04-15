@@ -2,10 +2,10 @@ package header
 
 import (
 	"encoding/binary"
-	"errors"
 	"sync"
 
 	"github.com/ndsky1003/crpc/coder"
+	"github.com/ndsky1003/crpc/comm"
 	"github.com/ndsky1003/crpc/compressor"
 	"github.com/ndsky1003/crpc/header/headertype"
 )
@@ -13,12 +13,7 @@ import (
 const (
 	// MaxHeaderSize = 4 + 2 + 2 + 2 + 10 + 10 + 10 + 10 + 10 + 10 + 4 (10 refer to binary.MaxVarintLen64)
 	MaxHeaderSize = 74
-
-	Uint32Size = 4
-	Uint16Size = 2
 )
-
-var UnmarshalError = errors.New("error occurred in Unmarshal")
 
 // Header request header structure looks like:
 // +---------+----------+---------+------------+-------------------+-----------------+-------------------+-----------------+----------+------------+----------+
@@ -46,9 +41,11 @@ func (this *Header) InitVersionType(v uint32, t headertype.Type) {
 	this.Type = t
 }
 
-func (this *Header) InitData(v uint32, t headertype.Type, from_service, to_service, module, method string, seq uint64) {
+func (this *Header) InitData(v uint32, t headertype.Type, coderT coder.CoderType, compressT compressor.CompressType, from_service, to_service, module, method string, seq uint64) {
 	this.Version = v
 	this.Type = t
+	this.CoderType = coderT
+	this.CompressType = compressT
 	this.FromService = from_service
 	this.ToService = to_service
 	this.Module = module
@@ -64,29 +61,29 @@ func (r *Header) Marshal() []byte {
 	header := make([]byte, MaxHeaderSize+len(r.FromService)+len(r.ToService)+len(r.Module)+len(r.Method))
 
 	binary.LittleEndian.PutUint32(header[idx:], r.Version)
-	idx += Uint32Size
+	idx += comm.Uint32Size
 
 	binary.LittleEndian.PutUint16(header[idx:], uint16(r.Type))
-	idx += Uint16Size
+	idx += comm.Uint16Size
 
 	binary.LittleEndian.PutUint16(header[idx:], uint16(r.CoderType))
-	idx += Uint16Size
+	idx += comm.Uint16Size
 
 	binary.LittleEndian.PutUint16(header[idx:], uint16(r.CompressType))
-	idx += Uint16Size
+	idx += comm.Uint16Size
 
-	idx += writeString(header[idx:], r.FromService)
+	idx += comm.BinaryWriteString(header[idx:], r.FromService)
 
-	idx += writeString(header[idx:], r.ToService)
+	idx += comm.BinaryWriteString(header[idx:], r.ToService)
 
-	idx += writeString(header[idx:], r.Module)
+	idx += comm.BinaryWriteString(header[idx:], r.Module)
 
-	idx += writeString(header[idx:], r.Method)
+	idx += comm.BinaryWriteString(header[idx:], r.Method)
 
 	idx += binary.PutUvarint(header[idx:], r.Seq)
 	idx += binary.PutUvarint(header[idx:], r.BodyLen)
 	binary.LittleEndian.PutUint32(header[idx:], r.Checksum)
-	idx += Uint32Size
+	idx += comm.Uint32Size
 	return header[:idx]
 }
 
@@ -95,37 +92,37 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 	r.Lock()
 	defer r.Unlock()
 	if len(data) == 0 {
-		return UnmarshalError
+		return comm.UnmarshalError
 	}
 
 	defer func() {
 		if r := recover(); r != nil {
-			err = UnmarshalError
+			err = comm.UnmarshalError
 		}
 	}()
 	idx, size := 0, 0
 	r.Version = binary.LittleEndian.Uint32(data[idx:])
-	idx += Uint32Size
+	idx += comm.Uint32Size
 
 	r.Type = headertype.Type(binary.LittleEndian.Uint16(data[idx:]))
-	idx += Uint16Size
+	idx += comm.Uint16Size
 
 	r.CoderType = coder.CoderType(binary.LittleEndian.Uint16(data[idx:]))
-	idx += Uint16Size
+	idx += comm.Uint16Size
 
 	r.CompressType = compressor.CompressType(binary.LittleEndian.Uint16(data[idx:]))
-	idx += Uint16Size
+	idx += comm.Uint16Size
 
-	r.FromService, size = readString(data[idx:])
+	r.FromService, size = comm.BinaryReadString(data[idx:])
 	idx += size
 
-	r.ToService, size = readString(data[idx:])
+	r.ToService, size = comm.BinaryReadString(data[idx:])
 	idx += size
 
-	r.Module, size = readString(data[idx:])
+	r.Module, size = comm.BinaryReadString(data[idx:])
 	idx += size
 
-	r.Method, size = readString(data[idx:])
+	r.Method, size = comm.BinaryReadString(data[idx:])
 	idx += size
 
 	r.Seq, size = binary.Uvarint(data[idx:])
@@ -168,66 +165,4 @@ func (r *Header) Reset() {
 	r.CoderType = 0
 	r.CompressType = 0
 	r.BodyLen = 0
-}
-
-func readString(data []byte) (string, int) {
-	idx := 0
-	length, size := binary.Uvarint(data)
-	idx += size
-	str := string(data[idx : idx+int(length)])
-	idx += len(str)
-	return str, idx
-}
-
-func writeString(data []byte, str string) int {
-	idx := 0
-	idx += binary.PutUvarint(data, uint64(len(str)))
-	copy(data[idx:], str)
-	idx += len(str)
-	return idx
-}
-
-type FileBody struct {
-	ChunksIndex uint16 // 65525个
-	Filename    string //存储路径
-	Data        []byte
-}
-
-// Marshal will encode request header into a byte slice
-
-// 10 + 10
-const MaxFileBodySize = 12
-
-func (r *FileBody) Marshal() []byte {
-	idx := 0
-	body := make([]byte, MaxFileBodySize+len(r.Filename)+len(r.Data))
-
-	binary.LittleEndian.PutUint16(body[idx:], r.ChunksIndex)
-	idx += Uint16Size
-
-	idx += writeString(body[idx:], r.Filename)
-
-	copy(body[idx:], r.Data)
-	idx += len(r.Data)
-	return body[:idx]
-}
-
-// Unmarshal will decode request header into a byte slice
-func (r *FileBody) Unmarshal(data []byte) (err error) {
-	if len(data) == 0 {
-		return UnmarshalError
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			err = UnmarshalError
-		}
-	}()
-	idx, size := 0, 0
-	r.ChunksIndex = binary.LittleEndian.Uint16(data[idx:])
-	idx += Uint16Size
-	r.Data = data[idx:]
-	r.Filename, size = readString(data[idx:])
-	idx += size
-	return
 }

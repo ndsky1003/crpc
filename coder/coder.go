@@ -11,9 +11,11 @@ type CoderType uint16
 const (
 	JSON CoderType = iota
 	MsgPack
+	FilePack
 )
 
 var Coders = map[CoderType]Coder{
-	JSON:    new_json_coder(),
-	MsgPack: new_msg_pack(),
+	JSON:     new_json_coder(),
+	MsgPack:  new_msg_pack(),
+	FilePack: new_file_pack(),
 }

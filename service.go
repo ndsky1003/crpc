@@ -92,7 +92,7 @@ func (this *service) serve() {
 		case headertype.Ping:
 			h.Type = headertype.Pong
 			go this.WriteRawData(h, data)
-		case headertype.Req, headertype.Msg: //forward
+		case headertype.Req, headertype.Chunks, headertype.Msg: //forward
 			if e := this.server.WriteRawData(h.ToService, h, data); e != nil {
 				logrus.Error(e)
 				h.Type = headertype.Reply_Error
