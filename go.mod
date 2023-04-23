@@ -6,6 +6,7 @@ require (
 	github.com/golang/snappy v0.0.4
 	github.com/sirupsen/logrus v1.9.0
 	github.com/vmihailenco/msgpack/v5 v5.3.5
+	google.golang.org/protobuf v1.30.0
 )
 
 require (
