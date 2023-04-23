@@ -436,9 +436,14 @@ func (this *Client) _go(ht headertype.Type, coderT coder.CoderType, compressT co
 }
 
 // send msg 就是类似于MQ
-func (this *Client) Send(server, module, method string, v any) error {
+func (this *Client) Send(server, moduleFunc string, v any) error {
 	if server == "" {
 		return errors.New("server is empty")
+	}
+
+	module, method, err := this.parseMoudleFunc(moduleFunc)
+	if err != nil {
+		return err
 	}
 	if module == "" {
 		return errors.New("module is empty")
@@ -447,7 +452,7 @@ func (this *Client) Send(server, module, method string, v any) error {
 		return errors.New("method is empty")
 	}
 	h := header.Get()
-	h.InitData(this.version, headertype.Msg, this.coderType, this.compressType, "", server, module, method, 0)
+	h.InitData(this.version, headertype.Msg, this.coderType, this.compressType, this.name, server, module, method, 0)
 	defer h.Release()
 	return this.send(h, v)
 }
