@@ -13,6 +13,8 @@ import (
 const (
 	// MaxHeaderSize = 4 + 2 + 2 + 2 + 10 + 10 + 10 + 10 + 10 + 10 + 4 (10 refer to binary.MaxVarintLen64)
 	MaxHeaderSize = 74
+	//防止链接异常，传入的第一个数字过大，导致耗尽系统资源，已经遇到过该问题，所以修复
+	FrozeMaxHeaderSize = MaxHeaderSize + 100 + 100 + 100 + 100 //固定最大header长度,超过这个长度就属于异常数据
 )
 
 // Header request header structure looks like:

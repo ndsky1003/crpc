@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+
+	"github.com/ndsky1003/crpc/header"
 )
 
 func sendFrame(w io.Writer, data []byte) (err error) {
@@ -30,6 +32,9 @@ func recvFrame(r io.Reader) (data []byte, err error) {
 	size, err := binary.ReadUvarint(r.(io.ByteReader))
 	if err != nil {
 		return nil, err
+	}
+	if size > header.FrozeMaxHeaderSize {
+		return nil, ReadHeaderError
 	}
 	if size != 0 {
 		data = make([]byte, size)

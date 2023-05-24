@@ -7,4 +7,5 @@ var (
 	UnexpectedChecksumError     = errors.New("codec unexpected checksum")
 	WriteError                  = errors.New("codec WriteError")
 	ReadError                   = errors.New("codec ReadError")
+	ReadHeaderError             = errors.New("header size greater than FrozeMaxHeaderSize")
 )
