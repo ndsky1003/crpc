@@ -31,6 +31,7 @@ func (*robot_service) CallBool(a bool, r *bool) error {
 	return nil
 }
 func (*robot_service) CallSlice(a []*test_obj_data, r *string) error {
+	fmt.Printf("a:%+v\n", a)
 	*r = a[0].Name
 	return nil
 }
@@ -50,6 +51,10 @@ func (*robot_service) CallPointer(a *string, r *string) error {
 type test_obj_data struct {
 	Name string
 	Age  int
+}
+
+func (this *test_obj_data) String() string {
+	return fmt.Sprintf("%+v", *this)
 }
 
 func TestMain(m *testing.M) {

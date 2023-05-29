@@ -9,9 +9,10 @@ import (
 	"github.com/ndsky1003/crpc/compressor"
 	"github.com/ndsky1003/crpc/dto"
 	"github.com/ndsky1003/crpc/header/headertype"
+	"github.com/ndsky1003/crpc/options"
 )
 
-func (this *Client) SendFile(server string, moduleFunc string, filename string, reader io.Reader) error {
+func (this *Client) SendFile(server string, moduleFunc string, filename string, reader io.Reader, opts ...*options.SendOptions) error {
 	if filename == "" {
 		return errors.New("filename not empty")
 	}
@@ -25,6 +26,11 @@ func (this *Client) SendFile(server string, moduleFunc string, filename string, 
 	filebody := &dto.FileBody{
 		Filename: filename,
 	}
+	opt := options.Send().Merge(opts...)
+	opt.SetCoderType(coder.FilePack).SetCompressorType(compressor.Raw)
+	if opt.Timeout == nil {
+		opt.SetTimeout(60 * 60 * 2)
+	}
 	for {
 		n, err := reader.Read(data)
 		if err != nil {
@@ -32,7 +38,8 @@ func (this *Client) SendFile(server string, moduleFunc string, filename string, 
 		}
 		filebody.ChunksIndex = chunkIndex
 		filebody.Data = data[:n]
-		if err := this._call(headertype.Chunks, coder.FilePack, compressor.Raw, 60*60*2, server, moduleFunc, filebody, nil); err != nil {
+		//if err := this._call(headertype.Chunks, coder.FilePack, compressor.Raw, 60*60*2, server, moduleFunc, filebody, nil); err != nil {
+		if err := this._call(headertype.Chunks, server, moduleFunc, filebody, nil, opt); err != nil {
 			return err
 		}
 		if n < this.chunksSize {

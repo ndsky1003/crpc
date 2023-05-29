@@ -19,6 +19,7 @@ import (
 	"github.com/ndsky1003/crpc/header"
 	"github.com/ndsky1003/crpc/header/headertype"
 	"github.com/ndsky1003/crpc/options"
+	"github.com/ndsky1003/crpc/serializer"
 	"github.com/sirupsen/logrus"
 )
 
@@ -35,6 +36,7 @@ type Client struct {
 	moduleMap     sync.Map // map[string]*module
 	coderType     coder.CoderType
 	compressType  compressor.CompressType
+	serializer    serializer.Serializer
 	chunksSize    int
 	l             sync.Mutex
 	codecGenFunc  codecFunc
@@ -79,6 +81,9 @@ func Dial(name, url string, opts ...*options.ClientOptions) *Client {
 	}
 	if opt.CompressType != nil {
 		c.compressType = *opt.CompressType
+	}
+	if opt.Serializer != nil {
+		c.serializer = opt.Serializer
 	}
 	c.codecGenFunc = func(conn io.ReadWriteCloser) (codec.Codec, error) {
 		return codec.NewCodec(conn), nil
@@ -212,11 +217,11 @@ func (this *Client) StopHeart() {
 	this.isStopHeart = true
 }
 
-func (this *Client) PrintCall() {
-	for index, call := range this.pending {
-		logrus.Infof("index:%d,msg:%+v\n", index, call.Error)
-	}
-}
+//func (this *Client) PrintCall() {
+//for index, call := range this.pending {
+//logrus.Infof("index:%d,msg:%+v\n", index, call.Error)
+//}
+//}
 
 func (this *Client) func_call(coderT coder.CoderType, moduleStr, method string, reqData []byte) (ret any, err error) {
 	if v, ok := this.moduleMap.Load(moduleStr); !ok {
@@ -327,6 +332,7 @@ func (this *Client) input(codec codec.Codec) {
 			}()
 		case headertype.Reply_Success, headertype.Reply_Error: //响应
 			seq := h.Seq
+			fmt.Println("receive seq:", seq)
 			var call *Call
 			if this.version == h.Version {
 				this.l.Lock()
@@ -382,15 +388,18 @@ func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string,
 }
 
 // 对外的方法 sync
-func (this *Client) Call(server string, moduleFunc string, req, ret any) error {
-	return this._call(headertype.Req, this.coderType, this.compressType, this.timeout, server, moduleFunc, req, ret)
+func (this *Client) Call(server string, moduleFunc string, req, ret any, opts ...*options.SendOptions) error {
+	opt := options.Send().Merge(opts...)
+	opt.OverrideNil(&this.coderType, &this.compressType, this.serializer, &this.timeout, &this.chunksSize)
+	return this._call(headertype.Req, server, moduleFunc, req, ret, opt)
 }
 
-func (this *Client) _call(ht headertype.Type, coderT coder.CoderType, compressT compressor.CompressType, timeout time.Duration, server string, moduleFunc string, req, ret any) error {
+func (this *Client) _call(ht headertype.Type, server string, moduleFunc string, req, ret any, opt *options.SendOptions) error {
+	timeout := *opt.Timeout
 	if timeout > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
 		defer cancel()
-		call := this._go(ht, coderT, compressT, server, moduleFunc, req, ret, make(chan *Call, 1))
+		call := this._go(ht, server, moduleFunc, req, ret, make(chan *Call, 1), opt)
 		select {
 		case <-ctx.Done():
 			return ReqTimeOutError
@@ -398,17 +407,19 @@ func (this *Client) _call(ht headertype.Type, coderT coder.CoderType, compressT 
 			return call.Error
 		}
 	} else {
-		call := <-this._go(ht, coderT, compressT, server, moduleFunc, req, ret, make(chan *Call, 1)).Done
+		call := <-this._go(ht, server, moduleFunc, req, ret, make(chan *Call, 1), opt).Done
 		return call.Error
 	}
 }
 
 // async
-func (this *Client) Go(server string, moduleFunc string, req, ret any, done chan *Call) *Call {
-	return this._go(headertype.Req, this.coderType, this.compressType, server, moduleFunc, req, ret, done)
+func (this *Client) Go(server string, moduleFunc string, req, ret any, done chan *Call, opts ...*options.SendOptions) *Call {
+	opt := options.Send().Merge(opts...)
+	opt.OverrideNil(&this.coderType, &this.compressType, this.serializer, &this.timeout, &this.chunksSize)
+	return this._go(headertype.Req, server, moduleFunc, req, ret, done, opt)
 }
 
-func (this *Client) _go(ht headertype.Type, coderT coder.CoderType, compressT compressor.CompressType, server string, moduleFunc string, req, ret any, done chan *Call) *Call {
+func (this *Client) _go(ht headertype.Type, server string, moduleFunc string, req, ret any, done chan *Call, opt *options.SendOptions) *Call {
 	call := &Call{}
 	if done == nil {
 		done = make(chan *Call, 10) // buffered.
@@ -431,16 +442,15 @@ func (this *Client) _go(ht headertype.Type, coderT coder.CoderType, compressT co
 		call.done()
 		return call
 	}
-	this.sendCall(ht, coderT, compressT, call)
+	this.sendCall(ht, call, opt)
 	return call
 }
 
 // send msg 就是类似于MQ
-func (this *Client) Send(server, moduleFunc string, v any) error {
+func (this *Client) Send(server, moduleFunc string, v any, opts ...*options.SendOptions) error {
 	if server == "" {
 		return errors.New("server is empty")
 	}
-
 	module, method, err := this.parseMoudleFunc(moduleFunc)
 	if err != nil {
 		return err
@@ -451,8 +461,10 @@ func (this *Client) Send(server, moduleFunc string, v any) error {
 	if method == "" {
 		return errors.New("method is empty")
 	}
+	opt := options.Send().Merge(opts...)
+	opt.OverrideNil(&this.coderType, &this.compressType, this.serializer, &this.timeout, &this.chunksSize)
 	h := header.Get()
-	h.InitData(this.version, headertype.Msg, this.coderType, this.compressType, this.name, server, module, method, 0)
+	h.InitData(this.version, headertype.Msg, *opt.CoderType, *opt.CompressType, this.name, server, module, method, 0)
 	defer h.Release()
 	return this.send(h, v)
 }
@@ -485,21 +497,20 @@ func (this *Client) unmarshal(coderT coder.CoderType, data *[]byte, v any) error
 	return this.codec.Unmarshal(coderT, data, v)
 }
 
-func (this *Client) sendCall(ht headertype.Type, coderT coder.CoderType, compressT compressor.CompressType, call *Call) {
+func (this *Client) sendCall(ht headertype.Type, call *Call, opt *options.SendOptions) {
 	if call == nil {
 		return
 	}
-	this.l.Lock()
 	atomic.AddUint64(&this.seq, 1)
 	seq := this.seq
+	this.l.Lock()
 	this.pending[seq] = call
 	this.l.Unlock()
 	h := header.Get()
 	defer func() {
 		header.Release(h)
 	}()
-	h.InitData(this.version, ht, coderT, compressT, this.name, call.Service, call.Module, call.Method, seq)
-	//logrus.Infof("header:%+v", h)
+	h.InitData(this.version, ht, *opt.CoderType, *opt.CompressType, this.name, call.Service, call.Module, call.Method, seq)
 	if err := this.send(h, call.Req); err != nil {
 		this.l.Lock()
 		call = this.pending[seq]
