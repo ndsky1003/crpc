@@ -501,8 +501,7 @@ func (this *Client) sendCall(ht headertype.Type, call *Call, opt *options.SendOp
 	if call == nil {
 		return
 	}
-	atomic.AddUint64(&this.seq, 1)
-	seq := this.seq
+	seq := atomic.AddUint64(&this.seq, 1)// this.seq
 	this.l.Lock()
 	this.pending[seq] = call
 	this.l.Unlock()
