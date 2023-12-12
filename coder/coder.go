@@ -13,6 +13,7 @@ const (
 	MsgPack
 	FilePack
 	Protobuf
+	Msgp
 )
 
 var Coders = map[CoderType]Coder{
@@ -20,4 +21,5 @@ var Coders = map[CoderType]Coder{
 	MsgPack:  new_msg_pack(),
 	FilePack: new_file_pack(),
 	Protobuf: new_protobuf_pack(),
+	Msgp:     new_msgp_coder(),
 }

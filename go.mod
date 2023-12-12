@@ -10,6 +10,8 @@ require (
 )
 
 require (
+	github.com/philhofer/fwd v1.1.2 // indirect
+	github.com/tinylib/msgp v1.1.9 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
+	golang.org/x/sys v0.13.0 // indirect
 )
