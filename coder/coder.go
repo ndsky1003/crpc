@@ -14,12 +14,14 @@ const (
 	FilePack
 	Protobuf
 	Msgp
+	MsgPackJSONTag
 )
 
 var Coders = map[CoderType]Coder{
-	JSON:     new_json_coder(),
-	MsgPack:  new_msg_pack(),
-	FilePack: new_file_pack(),
-	Protobuf: new_protobuf_pack(),
-	Msgp:     new_msgp_coder(),
+	JSON:           new_json_coder(),
+	MsgPack:        new_msgpack(),
+	MsgPackJSONTag: new_msgpack_with_tag("json"),
+	FilePack:       new_file_pack(),
+	Protobuf:       new_protobuf_pack(),
+	Msgp:           new_msgp_coder(),
 }
