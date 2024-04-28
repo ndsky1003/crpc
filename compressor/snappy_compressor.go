@@ -2,7 +2,7 @@ package compressor
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 
 	"github.com/golang/snappy"
 )
@@ -32,7 +32,7 @@ func (_ *snappy_compressor) Zip(data []byte) (ret []byte, err error) {
 
 func (_ *snappy_compressor) Unzip(data []byte) ([]byte, error) {
 	r := snappy.NewReader(bytes.NewBuffer(data))
-	data, err := ioutil.ReadAll(r)
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
 	}
