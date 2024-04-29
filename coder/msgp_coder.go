@@ -5,24 +5,16 @@ package coder
 
 import (
 	"bytes"
-	"sync"
 
 	"github.com/tinylib/msgp/msgp"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
 type msgp_coder struct {
-	pool *sync.Pool
 }
 
 func new_msgp_coder() *msgp_coder {
-	return &msgp_coder{
-		pool: &sync.Pool{
-			New: func() any {
-				return &bytes.Buffer{}
-			},
-		},
-	}
+	return &msgp_coder{}
 }
 
 func (this *msgp_coder) Marshal(v any) ([]byte, error) {
@@ -55,7 +47,9 @@ func (this *msgp_coder) Unmarshal(data []byte, v any) error {
 		// buf := this.pool.Get().(*bytes.Buffer)
 		// defer this.pool.Put(buf)
 		// defer buf.Reset()
-		buf.Write(data)
+		if _, err := buf.Write(data); err != nil {
+			return err
+		}
 		return msgp.Decode(buf, value)
 	} else {
 		dec := msgpack.GetDecoder()

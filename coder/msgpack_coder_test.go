@@ -35,26 +35,40 @@ func Test_msg_pack_Marshal(t *testing.T) {
 	// t.Log(string(buf.Bytes()))
 
 	// m := map[string]any{}
-	// var m dto.Item
+	var m = dto.Item{
+		Id:    1,
+		Name:  "one",
+		Sex:   true,
+		Hobby: nil,
+		Sub: &dto.Item{
+			Id:    11,
+			Name:  "two",
+			Hobby: []string{"a", "b"},
+		},
+	}
 	// var m any
 	// msgpack.GetDecoder().SetCustomStructTag("json")
-	data := []byte{
-		134, 162, 73, 100, 1, 164, 78, 97, 109, 101, 163, 84,
-		111, 109, 163, 65, 103, 101, 18, 163, 83, 101, 120, 195,
-		165, 72, 111, 98, 98, 121, 146, 166, 229, 186, 166, 230,
-		149, 176, 164, 110, 105, 104, 97, 163, 83, 117, 98, 134,
-		162, 73, 100, 11, 164, 78, 97, 109, 101, 164, 84, 111,
-		109, 49, 163, 65, 103, 101, 204, 181, 163, 83, 101, 120,
-		194, 165, 72, 111, 98, 98, 121, 145, 164, 110, 105, 104,
-		97, 163, 83, 117, 98, 192,
-	}
+	// data := []byte{
+	// 	132, 163, 65, 103, 101, 34, 163, 83, 101, 120, 195,
+	// 	165, 72, 111, 98, 98, 121, 145, 166, 229, 186, 166,
+	// 	230, 149, 176, 163, 83, 117, 98, 132, 162, 73, 100,
+	// 	204, 191, 163, 83, 117, 98, 192, 165, 72, 111, 98,
+	// 	98, 121, 146, 164, 110, 105, 104, 97, 169, 231, 160,
+	// 	129, 228, 187, 163, 231, 160, 129, 164, 78, 97, 109,
+	// 	101, 164, 84, 111, 109, 50,
+	// }
 
 	d := new_msgp_coder()
-	var obj dto.Item
-	if err := d.Unmarshal(data, &obj); err != nil {
+	data, err := d.Marshal(&m)
+	if err != nil {
 		t.Error(err)
 	}
-	t.Logf("obj:%+v", obj)
+	t.Log(data)
+	// var obj dto.Item
+	// if err := d.Unmarshal(data, &obj); err != nil {
+	// 	t.Error(err)
+	// }
+	// t.Logf("obj:%+v", obj)
 }
 
 // func Benchmark_msg_pack_Marshal_map(b *testing.B) {
@@ -118,13 +132,11 @@ func Benchmark_msg_pack_Marshal_struct(b *testing.B) {
 	m := &dto.Item{
 		Id:    1,
 		Name:  "one",
-		Age:   2,
 		Sex:   true,
 		Hobby: nil,
 		Sub: &dto.Item{
 			Id:   1,
 			Name: "one",
-			Age:  2,
 		},
 	}
 	for i := 0; i < b.N; i++ {
@@ -139,13 +151,11 @@ func Benchmark_msg_pack_Unmarshal_struct(b *testing.B) {
 	m := &dto.Item{
 		Id:    1,
 		Name:  "one",
-		Age:   2,
 		Sex:   true,
 		Hobby: nil,
 		Sub: &dto.Item{
 			Id:   1,
 			Name: "one",
-			Age:  2,
 		},
 	}
 	data, _ := pack.Marshal(m)
@@ -161,13 +171,11 @@ func Benchmark_json_Marshal_struct(b *testing.B) {
 	m := dto.Item{
 		Id:    1,
 		Name:  "one",
-		Age:   2,
 		Sex:   true,
 		Hobby: nil,
 		Sub: &dto.Item{
 			Id:   1,
 			Name: "one",
-			Age:  2,
 		},
 	}
 	for i := 0; i < b.N; i++ {
@@ -182,13 +190,11 @@ func Benchmark_json_Unmarshal_struct(b *testing.B) {
 	m := dto.Item{
 		Id:    1,
 		Name:  "one",
-		Age:   2,
 		Sex:   true,
 		Hobby: nil,
 		Sub: &dto.Item{
 			Id:   1,
 			Name: "one",
-			Age:  2,
 		},
 	}
 	data, _ := json.Marshal(m)

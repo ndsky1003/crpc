@@ -2,14 +2,24 @@
 中心服务的rpc，采用注册机制
 
 #### 数据类型支持
-1. coder.JSON 
+1. coder.JSON
 > 	number,string,bool,slice, map *point 测试通过
 
 2. coder.MsgPack
 > number,string,bool,slice, map *point 测试通过
 
+3. coder.Msgp
+> 当没有代码自动生成的时候(尚未实现其协议的)=>自动使用2.coder.MsgPack序列化
 
->自定义解码器的时候优先要测试需要支持的类型
+> 这里就需要注意其兼容性了,struct,只有*struct才是实现了其协议的,否则均会降级使用2.coder.MscPack
+mark: struct 使用2序列化.将字节码又通过3来反解就会有些不兼容
+
+> number,string,bool,slice, map *point 测试通过 map只支持string作为key
+
+
+
+
+##### 自定义解码器的时候优先要测试需要支持的类型
 
 
 #### 数据压缩
