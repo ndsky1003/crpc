@@ -15,6 +15,7 @@ const (
 	Protobuf
 	Msgp
 	MsgPackJSONTag
+	Sonic
 )
 
 var Coders = map[CoderType]Coder{
@@ -24,4 +25,5 @@ var Coders = map[CoderType]Coder{
 	FilePack:       new_file_pack(),
 	Protobuf:       new_protobuf_pack(),
 	Msgp:           new_msgp_coder(),
+	Sonic:          new_sonic_coder(),
 }
