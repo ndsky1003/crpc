@@ -14,6 +14,8 @@ type SendOptions struct {
 	serializer.Serializer
 	Timeout    *time.Duration
 	ChunksSize *int
+	IsSendRaw  *bool //有一种情况,就是发送的时候已经是data,就是已经marshal的数据,但是反解的时候又需要codetype.
+	//eg:后台发送json数据,直到有戏服才需要unmarshal
 }
 
 func Send() *SendOptions {
@@ -60,6 +62,14 @@ func (this *SendOptions) SetChunksMaxSize(t int) *SendOptions {
 	return this
 }
 
+func (this *SendOptions) SetIsSendRaw(b bool) *SendOptions {
+	if this == nil {
+		return this
+	}
+	this.IsSendRaw = &b
+	return this
+}
+
 func (this *SendOptions) Merge(opts ...*SendOptions) *SendOptions {
 	for _, opt := range opts {
 		this.merge(opt)
@@ -82,6 +92,10 @@ func (this *SendOptions) merge(opt *SendOptions) {
 	}
 	if opt.Serializer != nil {
 		this.Serializer = opt.Serializer
+	}
+
+	if opt.IsSendRaw != nil {
+		this.IsSendRaw = opt.IsSendRaw
 	}
 }
 

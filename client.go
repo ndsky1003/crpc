@@ -139,7 +139,7 @@ func (this *Client) keepAlive() {
 			if !this.isStopHeart {
 				h := header.Get()
 				h.InitVersionType(this.version, headertype.Ping)
-				if err := this.send(h, nil); err != nil {
+				if err := this.send(h, nil, nil); err != nil {
 					logrus.Error(err)
 					if errors.Is(err, io.ErrShortWrite) || errors.Is(err, WriteError) || errors.Is(err, codec.WriteError) {
 						this.stop(err)
@@ -287,7 +287,7 @@ func (this *Client) input(codec codec.Codec) {
 				go func() {
 					defer header.Release(h)
 					h.Type = headertype.Pong
-					if e := this.send(h, nil); e != nil {
+					if e := this.send(h, nil, nil); e != nil {
 						log.Println(e)
 					}
 				}()
@@ -326,7 +326,7 @@ func (this *Client) input(codec codec.Codec) {
 				if preHeaderType == headertype.Chunks {
 					h.CoderType = this.coderType
 				}
-				if e := this.send(h, v); e != nil {
+				if e := this.send(h, v, nil); e != nil {
 					logrus.Error(e)
 				}
 			}()
@@ -466,10 +466,10 @@ func (this *Client) Send(server, moduleFunc string, v any, opts ...*options.Send
 	h := header.Get()
 	h.InitData(this.version, headertype.Msg, *opt.CoderType, *opt.CompressType, this.name, server, module, method, 0)
 	defer h.Release()
-	return this.send(h, v)
+	return this.send(h, v, opt)
 }
 
-func (this *Client) send(h *header.Header, v any) (err error) {
+func (this *Client) send(h *header.Header, v any, opt *options.SendOptions) (err error) {
 	this.l.Lock()
 	defer this.l.Unlock()
 	if !this.connecting {
@@ -480,7 +480,15 @@ func (this *Client) send(h *header.Header, v any) (err error) {
 		err = fmt.Errorf("%w,codec is nil", WriteError)
 		return
 	}
-	err = this.codec.Write(h, v)
+	if opt != nil && opt.IsSendRaw != nil && *opt.IsSendRaw {
+		if d, ok := v.([]byte); ok {
+			err = this.codec.WriteData(h, d)
+		} else {
+			err = fmt.Errorf("data:%v is not []byte", v)
+		}
+	} else {
+		err = this.codec.Write(h, v)
+	}
 	return
 }
 
@@ -501,7 +509,7 @@ func (this *Client) sendCall(ht headertype.Type, call *Call, opt *options.SendOp
 	if call == nil {
 		return
 	}
-	seq := atomic.AddUint64(&this.seq, 1)// this.seq
+	seq := atomic.AddUint64(&this.seq, 1) // this.seq
 	this.l.Lock()
 	this.pending[seq] = call
 	this.l.Unlock()
@@ -510,7 +518,7 @@ func (this *Client) sendCall(ht headertype.Type, call *Call, opt *options.SendOp
 		header.Release(h)
 	}()
 	h.InitData(this.version, ht, *opt.CoderType, *opt.CompressType, this.name, call.Service, call.Module, call.Method, seq)
-	if err := this.send(h, call.Req); err != nil {
+	if err := this.send(h, call.Req, opt); err != nil {
 		this.l.Lock()
 		call = this.pending[seq]
 		delete(this.pending, seq)
