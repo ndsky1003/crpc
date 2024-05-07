@@ -352,7 +352,8 @@ func (this *Client) input(codec codec.Codec) {
 					err = errors.New("reading error body: " + err.Error())
 					call.Error = fmt.Errorf("%w,header:%+v  err:%v", ServerError, h, err)
 				} else {
-					call.Error = fmt.Errorf("%w,err:%v", ServerError, errStr)
+					// call.Error = fmt.Errorf("%w,err:%v", ServerError, errStr)
+					call.Error = errors.New(errStr) //业务错误不需要包装
 				}
 				call.done()
 			default:
