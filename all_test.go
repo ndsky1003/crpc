@@ -57,10 +57,29 @@ func (this *test_obj_data) String() string {
 	return fmt.Sprintf("%+v", *this)
 }
 
+func SetList(req struct {
+	Name string
+}, r *int) error {
+	fmt.Println("SetList")
+	return nil
+}
+
 func TestMain(m *testing.M) {
 	go NewServer().Listen(":8081")
 	go func() {
-		Dial("client", "127.0.0.1:8081", options.Client().SetIsStopHeart(true).SetCoderType(coder.JSON)).RegisterName("rpc", new(robot_service))
+		client := Dial("client", "127.0.0.1:8081", options.Client().SetIsStopHeart(true).SetCoderType(coder.JSON))
+		client.RegisterName("rpc", new(robot_service))
+		if err := client.RegisterFunc("GetList", func(req int, ret *string) error {
+			fmt.Println("GetList")
+			*ret = "lya"
+			return nil
+		}); err != nil {
+			fmt.Println(err)
+		}
+		if err := client.RegisterFunc("SetList", SetList); err != nil {
+			fmt.Println(err)
+		}
+
 		select {}
 	}()
 	time.Sleep(2e9)
@@ -81,6 +100,13 @@ func Test_Call(t *testing.T) {
 	var a int8 = 120
 	var _ float64 = 120 //手动修改，因为不同额coder处理数据的默认类型不一致，但是最终结果是一致的
 	tests := []args{
+		{
+			name:   "func1",
+			server: "client",
+			method: "func.GetList",
+			a:      12,
+			r:      "lya",
+		},
 		{
 			name:   "1",
 			server: "client",
@@ -127,7 +153,7 @@ func Test_Call(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var ret any
-			if err := client1.Call(tt.server, tt.method, tt.a, &ret); err != nil {
+			if err := client1.Call(tt.server, tt.method, tt.a, &ret, options.Send().SetCoderType(coder.Msgp)); err != nil {
 				t.Error(err)
 			} else if tt.r != ret {
 				t.Logf("v:%+v", reflect.TypeOf(ret))

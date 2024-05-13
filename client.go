@@ -27,7 +27,8 @@ type codecFunc func(conn io.ReadWriteCloser) (codec.Codec, error)
 
 const defaultChunksSize = 1 * 1024 * 1024 //1M 不涉及上传文件，大多都是图片，所以限制1M合理，具体项目自定义
 
-// service - module -> func
+// 1. service - func_module -> anonymity_func
+// 1. service - module -> func
 type Client struct {
 	version       uint32 //问题自身产生的caller，被别的版本caller消费
 	name          string
@@ -255,7 +256,12 @@ func (this *Client) func_call(coderT coder.CoderType, moduleStr, method string, 
 				replyv.Elem().Set(reflect.MakeSlice(mtype.ReplyType.Elem(), 0, 0))
 			}
 			function := mtype.method.Func
-			returnValues := function.Call([]reflect.Value{mod.rcvr, argv, replyv})
+			var returnValues []reflect.Value
+			if mtype.is_func {
+				returnValues = function.Call([]reflect.Value{argv, replyv})
+			} else {
+				returnValues = function.Call([]reflect.Value{mod.rcvr, argv, replyv})
+			}
 			errInter := returnValues[0].Interface()
 			if errInter != nil {
 				err = errInter.(error)

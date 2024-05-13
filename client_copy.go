@@ -30,6 +30,7 @@ var typeOfError = reflect.TypeOf((*error)(nil)).Elem()
 
 type methodType struct {
 	sync.Mutex // protects counters
+	is_func    bool
 	method     reflect.Method
 	ArgType    reflect.Type
 	ReplyType  reflect.Type
@@ -44,6 +45,9 @@ type module struct {
 }
 
 func (this *Client) register(rcvr any, name string, useName bool) error {
+	if name == func_module_name {
+		return errors.New("module name can not be " + func_module_name)
+	}
 	m := new(module)
 	m.typ = reflect.TypeOf(rcvr)
 	m.rcvr = reflect.ValueOf(rcvr)
