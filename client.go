@@ -224,6 +224,57 @@ func (this *Client) StopHeart() {
 //}
 //}
 
+// 内部调用
+func (this *Client) func_call_local(moduleStr, method string, req any, ret any) (err error) {
+	if v, ok := this.moduleMap.Load(moduleStr); !ok {
+		err = fmt.Errorf("%w,module:%s is not exist", FuncError, moduleStr)
+		return
+	} else {
+		mod := v.(*module)
+		if mtype, ok := mod.methods[method]; !ok {
+			err = fmt.Errorf("%w,module:%v,method:%v is not exist", FuncError, moduleStr, method)
+			return
+		} else {
+			var argv, replyv reflect.Value
+			argv = reflect.ValueOf(req)
+			replyv = reflect.ValueOf(ret)
+			if !replyv.IsValid() || replyv.Type().Kind() != reflect.Ptr || replyv.IsNil() {
+				replyv = reflect.New(mtype.ReplyType.Elem())
+				switch mtype.ReplyType.Elem().Kind() {
+				case reflect.Map:
+					replyv.Elem().Set(reflect.MakeMap(mtype.ReplyType.Elem()))
+				case reflect.Slice:
+					replyv.Elem().Set(reflect.MakeSlice(mtype.ReplyType.Elem(), 0, 0))
+				}
+			}
+			function := mtype.method.Func
+
+			func() { //有可能传入的参数和调用参数类型不一致
+				defer func() {
+					if recover_err := recover(); recover_err != nil {
+						var ok1 bool
+						err, ok1 = recover_err.(error)
+						if !ok1 {
+							err = fmt.Errorf("%v", recover_err)
+						}
+					}
+				}()
+				var returnValues []reflect.Value
+				if mtype.is_func {
+					returnValues = function.Call([]reflect.Value{argv, replyv})
+				} else {
+					returnValues = function.Call([]reflect.Value{mod.rcvr, argv, replyv})
+				}
+				errInter := returnValues[0].Interface()
+				if errInter != nil {
+					err = errInter.(error)
+				}
+			}()
+			return
+		}
+	}
+}
+
 func (this *Client) func_call(coderT coder.CoderType, moduleStr, method string, reqData []byte) (ret any, err error) {
 	if v, ok := this.moduleMap.Load(moduleStr); !ok {
 		err = fmt.Errorf("%w,module:%s is not exist", FuncError, moduleStr)
@@ -396,6 +447,13 @@ func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string,
 
 // 对外的方法 sync
 func (this *Client) Call(server string, moduleFunc string, req, ret any, opts ...*options.SendOptions) error {
+	if server == this.name {
+		module, method, err := this.parseMoudleFunc(moduleFunc)
+		if err != nil {
+			return err
+		}
+		return this.func_call_local(module, method, req, ret)
+	}
 	opt := options.Send().Merge(opts...)
 	opt.OverrideNil(&this.coderType, &this.compressType, this.serializer, &this.timeout, &this.chunksSize)
 	return this._call(headertype.Req, server, moduleFunc, req, ret, opt)
