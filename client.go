@@ -359,6 +359,11 @@ func (this *Client) input(codec codec.Codec) {
 			}
 			go func() {
 				defer header.Release(h)
+				defer func() {
+					if err := recover(); err != nil {
+						logrus.Error(err)
+					}
+				}()
 				if _, e := this.func_call(h.GetCoderType(), h.Module, h.Method, data); e != nil {
 					logrus.Error(e)
 				}
@@ -371,6 +376,15 @@ func (this *Client) input(codec codec.Codec) {
 			}
 			go func() {
 				defer header.Release(h)
+				defer func() {
+					if err := recover(); err != nil {
+						logrus.Error(err)
+						h.Type = headertype.Reply_Error
+						if e := this.send(h, err, nil); e != nil {
+							logrus.Error(e)
+						}
+					}
+				}()
 				preHeaderType := h.Type
 				var v any
 				if ret, e := this.func_call(h.GetCoderType(), h.Module, h.Method, data); e != nil {
