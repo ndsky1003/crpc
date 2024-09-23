@@ -403,7 +403,7 @@ func (this *Client) input(codec codec.Codec) {
 			}()
 		case headertype.Reply_Success, headertype.Reply_Error: //响应
 			seq := h.Seq
-			fmt.Println("receive seq:", seq)
+			// fmt.Println("receive seq:", seq)
 			var call *Call
 			if this.version == h.Version {
 				this.l.Lock()
