@@ -3,18 +3,17 @@ package options
 import (
 	"time"
 
-	"github.com/ndsky1003/crpc/coder"
-	"github.com/ndsky1003/crpc/compressor"
-	"github.com/ndsky1003/crpc/serializer"
+	"github.com/ndsky1003/crpc/v2/coder"
+	"github.com/ndsky1003/crpc/v2/compressor"
+	"github.com/ndsky1003/crpc/v2/serializer"
 )
 
 type SendOptions struct {
 	CoderType    *coder.CoderType
 	CompressType *compressor.CompressType
-	serializer.Serializer
-	Timeout    *time.Duration
-	ChunksSize *int
-	IsSendRaw  *bool //有一种情况,就是发送的时候已经是data,就是已经marshal的数据,但是反解的时候又需要codetype.
+	Timeout      *time.Duration
+	ChunksSize   *int
+	IsSendRaw    *bool //有一种情况,就是发送的时候已经是data,就是已经marshal的数据,但是反解的时候又需要codetype.
 	//eg:后台发送json数据,直到有戏服才需要unmarshal
 }
 

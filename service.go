@@ -3,9 +3,9 @@ package crpc
 import (
 	"sync"
 
-	"github.com/ndsky1003/crpc/codec"
-	"github.com/ndsky1003/crpc/header"
-	"github.com/ndsky1003/crpc/header/headertype"
+	"github.com/ndsky1003/crpc/v2/codec"
+	"github.com/ndsky1003/crpc/v2/header"
+	"github.com/ndsky1003/crpc/v2/header/headertype"
 	"github.com/sirupsen/logrus"
 )
 

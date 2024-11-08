@@ -4,10 +4,10 @@ import (
 	"encoding/binary"
 	"sync"
 
-	"github.com/ndsky1003/crpc/coder"
-	"github.com/ndsky1003/crpc/comm"
-	"github.com/ndsky1003/crpc/compressor"
-	"github.com/ndsky1003/crpc/header/headertype"
+	"github.com/ndsky1003/crpc/v2/coder"
+	"github.com/ndsky1003/crpc/v2/comm"
+	"github.com/ndsky1003/crpc/v2/compressor"
+	"github.com/ndsky1003/crpc/v2/header/headertype"
 )
 
 const (

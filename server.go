@@ -7,9 +7,9 @@ import (
 	"net"
 	"sync"
 
-	"github.com/ndsky1003/crpc/codec"
-	"github.com/ndsky1003/crpc/header"
 	"github.com/ndsky1003/crpc/options"
+	"github.com/ndsky1003/crpc/v2/codec"
+	"github.com/ndsky1003/crpc/v2/header"
 	"github.com/sirupsen/logrus"
 )
 

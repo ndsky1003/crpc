@@ -6,10 +6,9 @@ import (
 	"hash/crc32"
 	"io"
 
-	"github.com/ndsky1003/crpc/coder"
-	"github.com/ndsky1003/crpc/compressor"
-	"github.com/ndsky1003/crpc/header"
-	"github.com/ndsky1003/crpc/options"
+	"github.com/ndsky1003/crpc/v2/coder"
+	"github.com/ndsky1003/crpc/v2/compressor"
+	"github.com/ndsky1003/crpc/v2/header"
 )
 
 // 编解码器
@@ -35,13 +34,9 @@ type codec struct {
 	c    io.Closer
 	conn io.ReadWriteCloser
 	h    *header.Header
-	//options following
-	//coderType             coder.CoderType
-	//compressType          compressor.CompressType
-	//serializer.Serializer //持久化工具
 }
 
-func NewCodec(conn io.ReadWriteCloser, opts ...*options.CodecOptions) Codec {
+func NewCodec(conn io.ReadWriteCloser) Codec {
 	if conn == nil {
 		panic("conn is nil")
 	}
@@ -50,21 +45,7 @@ func NewCodec(conn io.ReadWriteCloser, opts ...*options.CodecOptions) Codec {
 		r:    bufio.NewReader(conn),
 		w:    bufio.NewWriter(conn),
 		c:    conn,
-		//coderType:    coder.JSON,
-		//compressType: compressor.Raw,
 	}
-	//opt := options.CodecOptions{}
-	//opt.Merge(opts...)
-
-	//if opt.CoderType != nil {
-	//c.coderType = *opt.CoderType
-	//}
-	//if opt.CoderType != nil {
-	//c.compressType = *opt.CompressType
-	//}
-	//if opt.Serializer != nil {
-	//c.Serializer = opt.Serializer
-	//}
 	return c
 }
 

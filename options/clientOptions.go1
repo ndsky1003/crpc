@@ -3,21 +3,18 @@ package options
 import (
 	"time"
 
-	"github.com/ndsky1003/crpc/coder"
-	"github.com/ndsky1003/crpc/compressor"
-	"github.com/ndsky1003/crpc/serializer"
+	"github.com/ndsky1003/crpc/v2/coder"
+	"github.com/ndsky1003/crpc/v2/compressor"
 )
 
 type ClientOptions struct {
 	CoderType    *coder.CoderType
 	CompressType *compressor.CompressType
-	serializer.Serializer
 
-	Timeout       *time.Duration
-	CheckInterval *time.Duration
-	HeartInterval *time.Duration
+	Timeout       *time.Duration //这个发送的超时时间
+	CheckInterval *time.Duration //检测是否连接的间隔
+	HeartInterval *time.Duration //心跳间隔,负数默认不开启心跳检测
 	ChunksSize    *int
-	IsStopHeart   *bool
 	Secret        *string
 }
 
@@ -46,11 +43,6 @@ func (this *ClientOptions) SetCompressorType(t compressor.CompressType) *ClientO
 		return this
 	}
 	this.CompressType = &t
-	return this
-}
-
-func (this *ClientOptions) SetSerializer(s serializer.Serializer) *ClientOptions {
-	this.Serializer = s
 	return this
 }
 
@@ -86,14 +78,6 @@ func (this *ClientOptions) SetHeartInterval(t time.Duration) *ClientOptions {
 	return this
 }
 
-func (this *ClientOptions) SetIsStopHeart(is bool) *ClientOptions {
-	if this == nil {
-		return this
-	}
-	this.IsStopHeart = &is
-	return this
-}
-
 func (this *ClientOptions) Merge(opts ...*ClientOptions) *ClientOptions {
 	for _, opt := range opts {
 		this.merge(opt)
@@ -122,11 +106,5 @@ func (this *ClientOptions) merge(opt *ClientOptions) {
 	}
 	if opt.HeartInterval != nil {
 		this.HeartInterval = opt.HeartInterval
-	}
-	if opt.IsStopHeart != nil {
-		this.IsStopHeart = opt.IsStopHeart
-	}
-	if opt.Serializer != nil {
-		this.Serializer = opt.Serializer
 	}
 }

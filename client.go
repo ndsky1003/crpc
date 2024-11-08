@@ -13,13 +13,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ndsky1003/crpc/codec"
-	"github.com/ndsky1003/crpc/coder"
-	"github.com/ndsky1003/crpc/compressor"
-	"github.com/ndsky1003/crpc/header"
-	"github.com/ndsky1003/crpc/header/headertype"
-	"github.com/ndsky1003/crpc/options"
-	"github.com/ndsky1003/crpc/serializer"
+	"github.com/ndsky1003/crpc/v2/codec"
+	"github.com/ndsky1003/crpc/v2/coder"
+	"github.com/ndsky1003/crpc/v2/compressor"
+	"github.com/ndsky1003/crpc/v2/header"
+	"github.com/ndsky1003/crpc/v2/header/headertype"
+	"github.com/ndsky1003/crpc/v2/options"
 	"github.com/sirupsen/logrus"
 )
 
@@ -30,39 +29,25 @@ const defaultChunksSize = 1 * 1024 * 1024 //1M 不涉及上传文件，大多都
 // 1. service - func_module -> anonymity_func
 // 1. service - module -> func
 type Client struct {
-	version       uint32 //问题自身产生的caller，被别的版本caller消费
-	name          string
-	url           string
-	secret        string
-	moduleMap     sync.Map // map[string]*module
-	coderType     coder.CoderType
-	compressType  compressor.CompressType
-	serializer    serializer.Serializer
-	chunksSize    int
-	l             sync.Mutex
-	codecGenFunc  codecFunc
-	codec         codec.Codec
-	seq           uint64
-	pending       map[uint64]*Call
-	checkInterval time.Duration //链接检测
-	heartInterval time.Duration //心跳间隔
-	timeout       time.Duration // 负数 不失效
-	isStopHeart   bool          //是否关闭心跳
-	connecting    bool          // client is connecting
+	version      uint32 //问题自身产生的caller，被别的版本caller消费,版本1发送了一个call ,重启后版本2会消费这个call，会出现问题,因为seq是相等的
+	name         string
+	url          string
+	moduleMap    sync.Map // map[string]*module
+	l            sync.Mutex
+	codecGenFunc codecFunc
+	codec        codec.Codec
+	seq          uint64
+	pending      map[uint64]*Call
+	opt          *option
+	connecting   bool // client is connecting
 }
 
-func Dial(name, url string, opts ...*options.ClientOptions) *Client {
+func Dial(name, url string, opts ...*option) *Client {
 	c := &Client{
-		version:       uint32(time.Now().Unix()),
-		name:          name,
-		url:           url,
-		chunksSize:    defaultChunksSize,
-		pending:       make(map[uint64]*Call),
-		coderType:     coder.JSON,
-		compressType:  compressor.Raw,
-		checkInterval: 1,
-		heartInterval: 5,
-		timeout:       -1,
+		version: uint32(time.Now().Unix()),
+		name:    name,
+		url:     url,
+		pending: make(map[uint64]*Call),
 	}
 	if name == "" {
 		panic("name is empty")
@@ -70,41 +55,17 @@ func Dial(name, url string, opts ...*options.ClientOptions) *Client {
 	if url == "" {
 		panic("url is empty")
 	}
+	c.opt = Option().
+		SetCoderType(coder.JSON).
+		SetCompressorType(compressor.Raw).
+		SetTimeout(-1).
+		SetCheckInterval(1).
+		SetHeartInterval(5).
+		SetChunksMaxSize(defaultChunksSize).Merge(opts...)
 
 	//合并属性
-	opt := options.Client().Merge(opts...)
-	//属性设置开始
-	if opt.Secret != nil {
-		c.secret = *opt.Secret
-	}
-	if opt.CoderType != nil {
-		c.coderType = *opt.CoderType
-	}
-	if opt.CompressType != nil {
-		c.compressType = *opt.CompressType
-	}
-	if opt.Serializer != nil {
-		c.serializer = opt.Serializer
-	}
 	c.codecGenFunc = func(conn io.ReadWriteCloser) (codec.Codec, error) {
 		return codec.NewCodec(conn), nil
-	}
-	if opt.Timeout != nil {
-		c.timeout = *opt.Timeout
-	}
-	if opt.CheckInterval != nil {
-		c.checkInterval = *opt.CheckInterval
-	}
-
-	if opt.ChunksSize != nil {
-		c.chunksSize = *opt.ChunksSize
-	}
-
-	if opt.HeartInterval != nil {
-		c.heartInterval = *opt.HeartInterval
-	}
-	if opt.IsStopHeart != nil {
-		c.isStopHeart = *opt.IsStopHeart
 	}
 	go c.keepAlive()
 	return c
@@ -121,23 +82,24 @@ func (this *Client) keepAlive() {
 			conn, err := net.Dial("tcp", this.url)
 			if err != nil {
 				logrus.Errorf("dail err:%v\n", err)
-				time.Sleep(this.checkInterval * time.Second)
+				time.Sleep(*this.opt.CheckInterval * time.Second)
 				continue
 			}
 			codec, err := this.codecGenFunc(conn)
 			if err != nil {
 				logrus.Errorf("codec err:%v\n", err)
-				time.Sleep(this.checkInterval * time.Second)
+				time.Sleep(*this.opt.CheckInterval * time.Second)
 				continue
 			} else {
 				if err := this.serve(codec); err != nil {
 					logrus.Error("server:", err)
 				}
-				time.Sleep(this.checkInterval * time.Second) //防止连上就断开，再继续连接
+				time.Sleep(*this.opt.CheckInterval * time.Second) //防止连上就断开，再继续连接
 				continue
 			}
 		} else { //heart
-			if !this.isStopHeart {
+			heat_interval := *this.opt.HeartInterval
+			if heat_interval < 0 {
 				h := header.Get()
 				h.InitVersionType(this.version, headertype.Ping)
 				if err := this.send(h, nil, nil); err != nil {
@@ -146,9 +108,9 @@ func (this *Client) keepAlive() {
 						this.stop(err)
 					}
 				}
-				time.Sleep(this.heartInterval * time.Second)
+				time.Sleep(heat_interval * time.Second)
 			} else {
-				time.Sleep(this.checkInterval * time.Second) //下次去尝试连接
+				time.Sleep(*this.opt.CheckInterval * time.Second) //下次去尝试连接
 			}
 		}
 	}
@@ -163,7 +125,11 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 	}()
 	h := header.Get()
 	h.InitVersionType(this.version, headertype.Verify)
-	if err = codec.Write(h, verify_req{Name: this.name, Secret: this.secret}); err != nil {
+	var secret string
+	if v := this.opt.Secret; v != nil {
+		secret = *v
+	}
+	if err = codec.Write(h, verify_req{Name: this.name, Secret: secret}); err != nil {
 		logrus.Error(err)
 		return
 	}
@@ -200,7 +166,7 @@ func (this *Client) stop(err error) {
 	this.l.Lock()
 	defer this.l.Unlock()
 	for _, call := range this.pending {
-		call.Error = err
+		call.Err = err
 		call.done()
 	}
 	if this.connecting {
@@ -215,14 +181,8 @@ func (this *Client) stop(err error) {
 func (this *Client) StopHeart() {
 	this.l.Lock()
 	defer this.l.Unlock()
-	this.isStopHeart = true
+	this.opt.SetHeartInterval(-1)
 }
-
-//func (this *Client) PrintCall() {
-//for index, call := range this.pending {
-//logrus.Infof("index:%d,msg:%+v\n", index, call.Error)
-//}
-//}
 
 // 内部调用
 func (this *Client) func_call_local(moduleStr, method string, req any, ret any) (err error) {
@@ -460,7 +420,7 @@ func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string,
 }
 
 // 对外的方法 sync
-func (this *Client) Call(server string, moduleFunc string, req, ret any, opts ...*options.SendOptions) error {
+func (this *Client) Call(server string, moduleFunc string, req, ret any, opts ...*option) error {
 	if server == this.name {
 		module, method, err := this.parseMoudleFunc(moduleFunc)
 		if err != nil {
@@ -468,12 +428,11 @@ func (this *Client) Call(server string, moduleFunc string, req, ret any, opts ..
 		}
 		return this.func_call_local(module, method, req, ret)
 	}
-	opt := options.Send().Merge(opts...)
-	opt.OverrideNil(&this.coderType, &this.compressType, this.serializer, &this.timeout, &this.chunksSize)
+	opt := Option().Merge(this.opt).Merge(opts...)
 	return this._call(headertype.Req, server, moduleFunc, req, ret, opt)
 }
 
-func (this *Client) _call(ht headertype.Type, server string, moduleFunc string, req, ret any, opt *options.SendOptions) error {
+func (this *Client) _call(ht headertype.Type, server string, moduleFunc string, req, ret any, opt *option) error {
 	timeout := *opt.Timeout
 	if timeout > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
@@ -483,18 +442,17 @@ func (this *Client) _call(ht headertype.Type, server string, moduleFunc string, 
 		case <-ctx.Done():
 			return ReqTimeOutError
 		case <-call.Done:
-			return call.Error
+			return call.Err
 		}
 	} else {
 		call := <-this._go(ht, server, moduleFunc, req, ret, make(chan *Call, 1), opt).Done
-		return call.Error
+		return call.Err
 	}
 }
 
 // async
-func (this *Client) Go(server string, moduleFunc string, req, ret any, done chan *Call, opts ...*options.SendOptions) *Call {
-	opt := options.Send().Merge(opts...)
-	opt.OverrideNil(&this.coderType, &this.compressType, this.serializer, &this.timeout, &this.chunksSize)
+func (this *Client) Go(server string, moduleFunc string, req, ret any, done chan *Call, opts ...*option) *Call {
+	opt := Option().Merge(this.opt).Merge(opts...)
 	return this._go(headertype.Req, server, moduleFunc, req, ret, done, opt)
 }
 
