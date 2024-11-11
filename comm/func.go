@@ -4,6 +4,9 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"reflect"
+
+	"github.com/ndsky1003/crpc/v2/constant"
 )
 
 func BinaryReadString(data []byte) (string, int) {
@@ -36,4 +39,9 @@ func GetWriteFile(chunkIndex uint16, filename string) (f *os.File, err error) {
 	}
 	f, err = os.OpenFile(filename, flag, 0600)
 	return
+}
+
+func IsStandardErr(err error) bool {
+	et := reflect.TypeOf(err)
+	return et == constant.StandardError1 || et == constant.StandardError2
 }

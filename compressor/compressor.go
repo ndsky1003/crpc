@@ -4,14 +4,14 @@ type Compressor interface {
 	Zip([]byte) ([]byte, error)
 	Unzip([]byte) ([]byte, error)
 }
-type CompressType uint16
+type T uint16
 
 const (
-	Raw CompressType = iota
+	Raw T = iota
 	Snappy
 )
 
-var Compressors = map[CompressType]Compressor{
+var Compressors = map[T]Compressor{
 	Raw:    NewRawCompressor(),
 	Snappy: NewSnappyCompressor(),
 }

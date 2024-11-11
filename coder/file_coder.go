@@ -3,7 +3,7 @@ package coder
 import (
 	"errors"
 
-	"github.com/ndsky1003/crpc/dto"
+	"github.com/ndsky1003/crpc/v2/dto"
 )
 
 type file_pack struct {

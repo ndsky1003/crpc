@@ -6,7 +6,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/ndsky1003/crpc/header"
+	"github.com/ndsky1003/crpc/v2/header"
 )
 
 func sendFrame(w io.Writer, data []byte) (err error) {

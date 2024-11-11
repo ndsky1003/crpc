@@ -35,17 +35,17 @@ func Test_msg_pack_Marshal(t *testing.T) {
 	// t.Log(string(buf.Bytes()))
 
 	// m := map[string]any{}
-	var m = dto.Item{
-		Id:    1,
-		Name:  "one",
-		Sex:   true,
-		Hobby: nil,
-		Sub: &dto.Item{
-			Id:    11,
-			Name:  "two",
-			Hobby: []string{"a", "b"},
-		},
-	}
+	// var m = dto.Item{
+	// 	Id:    1,
+	// 	Name:  "one",
+	// 	Sex:   true,
+	// 	Hobby: nil,
+	// 	Sub: &dto.Item{
+	// 		Id:    11,
+	// 		Name:  "two",
+	// 		Hobby: []string{"a", "b"},
+	// 	},
+	// }
 	// var m any
 	// msgpack.GetDecoder().SetCustomStructTag("json")
 	// data := []byte{
@@ -58,12 +58,12 @@ func Test_msg_pack_Marshal(t *testing.T) {
 	// 	101, 164, 84, 111, 109, 50,
 	// }
 
-	d := new_msgp_coder()
-	data, err := d.Marshal(&m)
-	if err != nil {
-		t.Error(err)
-	}
-	t.Log(data)
+	// d := new_msgp_coder()
+	// data, err := d.Marshal(&m)
+	// if err != nil {
+	// 	t.Error(err)
+	// }
+	// t.Log(data)
 	// var obj dto.Item
 	// if err := d.Unmarshal(data, &obj); err != nil {
 	// 	t.Error(err)

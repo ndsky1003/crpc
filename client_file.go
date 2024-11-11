@@ -5,31 +5,31 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/ndsky1003/crpc/coder"
-	"github.com/ndsky1003/crpc/compressor"
-	"github.com/ndsky1003/crpc/dto"
-	"github.com/ndsky1003/crpc/header/headertype"
-	"github.com/ndsky1003/crpc/options"
+	"github.com/ndsky1003/crpc/v2/coder"
+	"github.com/ndsky1003/crpc/v2/compressor"
+	"github.com/ndsky1003/crpc/v2/dto"
+	"github.com/ndsky1003/crpc/v2/header/headertype"
 )
 
-func (this *Client) SendFile(server string, moduleFunc string, filename string, reader io.Reader, opts ...*options.SendOptions) error {
-	if filename == "" {
+func (this *Client) SendFile(server string, moduleFunc string, save_path string, reader io.Reader, opts ...*option) error {
+	if save_path == "" {
 		return errors.New("filename not empty")
 	}
 
-	if filepath.IsAbs(filename) {
+	if filepath.IsAbs(save_path) {
 		return errors.New("filename must relative path")
 	}
 
-	data := make([]byte, this.chunksSize)
+	opt := Option().Merge(this.opt).Merge(opts...).
+		SetCoderType(coder.FilePack).
+		SetCompressorType(compressor.Raw).
+		SetTimeout(60 * 60 * 2)
+	chunks_size := *opt.ChunksSize
+
+	data := make([]byte, chunks_size)
 	var chunkIndex uint16 = 0
 	filebody := &dto.FileBody{
-		Filename: filename,
-	}
-	opt := options.Send().Merge(opts...)
-	opt.SetCoderType(coder.FilePack).SetCompressorType(compressor.Raw)
-	if opt.Timeout == nil {
-		opt.SetTimeout(60 * 60 * 2)
+		Filename: save_path,
 	}
 	for {
 		n, err := reader.Read(data)
@@ -38,11 +38,10 @@ func (this *Client) SendFile(server string, moduleFunc string, filename string, 
 		}
 		filebody.ChunksIndex = chunkIndex
 		filebody.Data = data[:n]
-		//if err := this._call(headertype.Chunks, coder.FilePack, compressor.Raw, 60*60*2, server, moduleFunc, filebody, nil); err != nil {
 		if err := this._call(headertype.Chunks, server, moduleFunc, filebody, nil, opt); err != nil {
 			return err
 		}
-		if n < this.chunksSize {
+		if n < chunks_size {
 			return nil
 		}
 		filebody.Offset += uint64(n)

@@ -120,9 +120,6 @@ func (this *server) WriteRawData(name string, h *header.Header, data []byte) err
 	if err != nil {
 		return err
 	}
-	//if h.Type == headertype.Chunks {
-	//logrus.Infof("forward:header:%+v,data:%+v\n", h, data)
-	//}
 	go s.WriteRawData(h, data)
 	return nil
 }

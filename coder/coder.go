@@ -6,10 +6,11 @@ type Coder interface {
 	Unmarshal([]byte, any) error
 }
 
-type CoderType uint16
+type T uint16
 
 const (
-	JSON CoderType = iota
+	Raw T = iota
+	JSON
 	MsgPack
 	FilePack
 	Protobuf
@@ -18,7 +19,7 @@ const (
 	Sonic
 )
 
-var Coders = map[CoderType]Coder{
+var Coders = map[T]Coder{
 	JSON:           new_json_coder(),
 	MsgPack:        new_msgpack(),
 	MsgPackJSONTag: new_msgpack_with_tag("json"),

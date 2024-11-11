@@ -18,7 +18,6 @@ import (
 	"github.com/ndsky1003/crpc/v2/compressor"
 	"github.com/ndsky1003/crpc/v2/header"
 	"github.com/ndsky1003/crpc/v2/header/headertype"
-	"github.com/ndsky1003/crpc/v2/options"
 	"github.com/sirupsen/logrus"
 )
 
@@ -56,11 +55,13 @@ func Dial(name, url string, opts ...*option) *Client {
 		panic("url is empty")
 	}
 	c.opt = Option().
-		SetCoderType(coder.JSON).
-		SetCompressorType(compressor.Raw).
+		SetMetaCoderT(coder.JSON).
+		SetReqCoderT(coder.JSON).
+		SetResCoderT(coder.JSON).
+		SetCompressT(compressor.Raw).
 		SetTimeout(-1).
 		SetCheckInterval(1).
-		SetHeartInterval(5).
+		SetHeartInterval(10).
 		SetChunksMaxSize(defaultChunksSize).Merge(opts...)
 
 	//合并属性
@@ -101,8 +102,9 @@ func (this *Client) keepAlive() {
 			heat_interval := *this.opt.HeartInterval
 			if heat_interval < 0 {
 				h := header.Get()
-				h.InitVersionType(this.version, headertype.Ping)
-				if err := this.send(h, nil, nil); err != nil {
+				// h.InitVersionType(this.version, headertype.Ping)
+				h.SetVersion(this.version).SetType(headertype.Ping)
+				if err := this.send(h, nil); err != nil {
 					logrus.Error(err)
 					if errors.Is(err, io.ErrShortWrite) || errors.Is(err, WriteError) || errors.Is(err, codec.WriteError) {
 						this.stop(err)
@@ -124,7 +126,8 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 		}
 	}()
 	h := header.Get()
-	h.InitVersionType(this.version, headertype.Verify)
+	// h.InitVersionType(this.version, headertype.Verify)
+	h.SetVersion(this.version).SetType(headertype.Verify)
 	var secret string
 	if v := this.opt.Secret; v != nil {
 		secret = *v
@@ -141,18 +144,15 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 	}
 	if h.Type != headertype.Verify {
 		err = fmt.Errorf("%w,headertype:%d is invalid", VerifyError, h.Type)
-		logrus.Error(err)
 		return
 	}
 	var res verify_res
 	if err = codec.ReadBody(&res); err != nil {
-		logrus.Error(err)
 		return
 	}
 	header.Release(h)
 	if !res.Success {
 		err = fmt.Errorf("%w,verify failed", VerifyError)
-		logrus.Error(err)
 		return
 	}
 	this.connecting = true
@@ -185,7 +185,7 @@ func (this *Client) StopHeart() {
 }
 
 // 内部调用
-func (this *Client) func_call_local(moduleStr, method string, req any, ret any) (err error) {
+func (this *Client) func_call_local(moduleStr, method string, req any, ret any, opt *option) (err error) {
 	if v, ok := this.moduleMap.Load(moduleStr); !ok {
 		err = fmt.Errorf("%w,module:%s is not exist", FuncError, moduleStr)
 		return
@@ -235,7 +235,7 @@ func (this *Client) func_call_local(moduleStr, method string, req any, ret any) 
 	}
 }
 
-func (this *Client) func_call(coderT coder.CoderType, moduleStr, method string, reqData []byte) (ret any, err error) {
+func (this *Client) func_call(coderT coder.T, moduleStr, method string, reqData []byte) (ret any, err error) {
 	if v, ok := this.moduleMap.Load(moduleStr); !ok {
 		err = fmt.Errorf("%w,module:%s is not exist", FuncError, moduleStr)
 		return
@@ -304,7 +304,7 @@ func (this *Client) input(codec codec.Codec) {
 				go func() {
 					defer header.Release(h)
 					h.Type = headertype.Pong
-					if e := this.send(h, nil, nil); e != nil {
+					if e := this.send(h, nil); e != nil {
 						log.Println(e)
 					}
 				}()
@@ -335,12 +335,12 @@ func (this *Client) input(codec codec.Codec) {
 				break
 			}
 			go func() {
-				defer header.Release(h)
+				defer h.Release()
 				defer func() {
 					if err := recover(); err != nil {
 						logrus.Error(err)
-						h.Type = headertype.Reply_Error
-						if e := this.send(h, err, nil); e != nil {
+						h.Type = headertype.Res_Err_Standard
+						if e := this.send(h, err); e != nil {
 							logrus.Error(e)
 						}
 					}
@@ -348,20 +348,20 @@ func (this *Client) input(codec codec.Codec) {
 				preHeaderType := h.Type
 				var v any
 				if ret, e := this.func_call(h.GetCoderType(), h.Module, h.Method, data); e != nil {
-					h.Type = headertype.Reply_Error
+					h.Type = headertype.Res_Err_Standard
 					v = e.Error()
 				} else {
-					h.Type = headertype.Reply_Success
+					h.Type = headertype.Res_Success
 					v = ret
 				}
-				if preHeaderType == headertype.Chunks {
-					h.CoderType = this.coderType
+				if preHeaderType == headertype.Chunks { //返回值errors那些,需要使用别的res来解码
+					h.ReqCoderT = *this.opt.CoderType
 				}
-				if e := this.send(h, v, nil); e != nil {
+				if e := this.send(h, v); e != nil {
 					logrus.Error(e)
 				}
 			}()
-		case headertype.Reply_Success, headertype.Reply_Error: //响应
+		case headertype.Res_Success, headertype.Res_Err_Standard: //响应
 			seq := h.Seq
 			// fmt.Println("receive seq:", seq)
 			var call *Call
@@ -377,20 +377,20 @@ func (this *Client) input(codec codec.Codec) {
 				if err != nil {
 					err = errors.New("reading error body: " + err.Error())
 				}
-			case h.Type == headertype.Reply_Error:
+			case h.Type == headertype.Res_Err_Standard:
 				var errStr string
 				if err := this.codec.ReadBody(&errStr); err != nil {
 					err = errors.New("reading error body: " + err.Error())
-					call.Error = fmt.Errorf("%w,header:%+v  err:%v", ServerError, h, err)
+					call.Err = fmt.Errorf("%w,header:%+v  err:%v", ServerError, h, err)
 				} else {
 					// call.Error = fmt.Errorf("%w,err:%v", ServerError, errStr)
-					call.Error = errors.New(errStr) //业务错误不需要包装
+					call.Err = errors.New(errStr) //业务错误不需要包装
 				}
 				call.done()
 			default:
 				err = this.codec.ReadBody(call.Ret)
 				if err != nil {
-					call.Error = errors.New("reading body " + err.Error())
+					call.Err = errors.New("reading body " + err.Error())
 				}
 				call.done()
 			}
@@ -421,18 +421,18 @@ func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string,
 
 // 对外的方法 sync
 func (this *Client) Call(server string, moduleFunc string, req, ret any, opts ...*option) error {
+	opt := Option().Merge(this.opt).Merge(opts...)
 	if server == this.name {
 		module, method, err := this.parseMoudleFunc(moduleFunc)
 		if err != nil {
 			return err
 		}
-		return this.func_call_local(module, method, req, ret)
+		return this.func_call_local(module, method, req, ret, opt)
 	}
-	opt := Option().Merge(this.opt).Merge(opts...)
 	return this._call(headertype.Req, server, moduleFunc, req, ret, opt)
 }
 
-func (this *Client) _call(ht headertype.Type, server string, moduleFunc string, req, ret any, opt *option) error {
+func (this *Client) _call(ht headertype.T, server string, moduleFunc string, req, ret any, opt *option) error {
 	timeout := *opt.Timeout
 	if timeout > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
@@ -451,12 +451,12 @@ func (this *Client) _call(ht headertype.Type, server string, moduleFunc string, 
 }
 
 // async
-func (this *Client) Go(server string, moduleFunc string, req, ret any, done chan *Call, opts ...*option) *Call {
+func (this *Client) Go(server string, moduleFunc string, req, ret any, opts ...*option) *Call {
 	opt := Option().Merge(this.opt).Merge(opts...)
-	return this._go(headertype.Req, server, moduleFunc, req, ret, done, opt)
+	return this._go(headertype.Req, server, moduleFunc, req, ret, make(chan *Call, 1), opt)
 }
 
-func (this *Client) _go(ht headertype.Type, server string, moduleFunc string, req, ret any, done chan *Call, opt *options.SendOptions) *Call {
+func (this *Client) _go(ht headertype.T, server string, moduleFunc string, req, ret any, done chan *Call, opt *option) *Call {
 	call := &Call{}
 	if done == nil {
 		done = make(chan *Call, 10) // buffered.
@@ -469,13 +469,13 @@ func (this *Client) _go(ht headertype.Type, server string, moduleFunc string, re
 	call.Req = req
 	call.Ret = ret
 	if server == "" {
-		call.Error = fmt.Errorf("server is emtpty")
+		call.Err = fmt.Errorf("server is emtpty")
 		call.done()
 		return call
 	}
 	call.Service = server
-	call.Module, call.Method, call.Error = this.parseMoudleFunc(moduleFunc)
-	if call.Error != nil {
+	call.Module, call.Method, call.Err = this.parseMoudleFunc(moduleFunc)
+	if call.Err != nil {
 		call.done()
 		return call
 	}
@@ -484,7 +484,7 @@ func (this *Client) _go(ht headertype.Type, server string, moduleFunc string, re
 }
 
 // send msg 就是类似于MQ
-func (this *Client) Send(server, moduleFunc string, v any, opts ...*options.SendOptions) error {
+func (this *Client) Send(server, moduleFunc string, v any, opts ...*option) error {
 	if server == "" {
 		return errors.New("server is empty")
 	}
@@ -498,15 +498,21 @@ func (this *Client) Send(server, moduleFunc string, v any, opts ...*options.Send
 	if method == "" {
 		return errors.New("method is empty")
 	}
-	opt := options.Send().Merge(opts...)
-	opt.OverrideNil(&this.coderType, &this.compressType, this.serializer, &this.timeout, &this.chunksSize)
+	opt := Option().Merge(this.opt).Merge(opts...)
 	h := header.Get()
-	h.InitData(this.version, headertype.Msg, *opt.CoderType, *opt.CompressType, this.name, server, module, method, 0)
+	h.SetVersion(this.version).
+		SetType(headertype.Msg).
+		SetReqCoderT(*opt.CoderType).
+		SetCompressT(*opt.CompressType).
+		SetFromService(this.name).
+		SetToService(server).
+		SetModule(module).SetMethod(method)
+
 	defer h.Release()
-	return this.send(h, v, opt)
+	return this.send(h, v)
 }
 
-func (this *Client) send(h *header.Header, v any, opt *options.SendOptions) (err error) {
+func (this *Client) send(h *header.Header, v any) (err error) {
 	this.l.Lock()
 	defer this.l.Unlock()
 	if !this.connecting {
@@ -517,32 +523,19 @@ func (this *Client) send(h *header.Header, v any, opt *options.SendOptions) (err
 		err = fmt.Errorf("%w,codec is nil", WriteError)
 		return
 	}
-	if opt != nil && opt.IsSendRaw != nil && *opt.IsSendRaw {
-		if d, ok := v.([]byte); ok {
-			err = this.codec.WriteData(h, d)
-		} else {
-			err = fmt.Errorf("data:%v is not []byte", v)
-		}
-	} else {
-		err = this.codec.Write(h, v)
-	}
+	// if opt != nil && opt.IsSendRaw != nil && *opt.IsSendRaw {
+	// 	if d, ok := v.([]byte); ok {
+	// 		err = this.codec.WriteData(h, d)
+	// 	} else {
+	// 		err = fmt.Errorf("data:%v is not []byte", v)
+	// 	}
+	// } else {
+	err = this.codec.Write(h, v)
+	// }
 	return
 }
 
-// lock prevent code = nil
-func (this *Client) marshal(coderT coder.CoderType, v any) ([]byte, error) {
-	this.l.Lock()
-	defer this.l.Unlock()
-	return this.codec.Marshal(coderT, v)
-}
-
-func (this *Client) unmarshal(coderT coder.CoderType, data *[]byte, v any) error {
-	this.l.Lock()
-	defer this.l.Unlock()
-	return this.codec.Unmarshal(coderT, data, v)
-}
-
-func (this *Client) sendCall(ht headertype.Type, call *Call, opt *options.SendOptions) {
+func (this *Client) sendCall(ht headertype.T, call *Call, opt *option) {
 	if call == nil {
 		return
 	}
@@ -551,19 +544,32 @@ func (this *Client) sendCall(ht headertype.Type, call *Call, opt *options.SendOp
 	this.pending[seq] = call
 	this.l.Unlock()
 	h := header.Get()
-	defer func() {
-		header.Release(h)
-	}()
-	h.InitData(this.version, ht, *opt.CoderType, *opt.CompressType, this.name, call.Service, call.Module, call.Method, seq)
-	if err := this.send(h, call.Req, opt); err != nil {
+	defer h.Release()
+	// h.InitData(this.version, ht, *opt.CoderType, *opt.CompressType, this.name, call.Service, call.Module, call.Method, seq)
+	h.SetVersion(this.version).
+		SetType(ht).
+		SetReqCoderT(*opt.CoderType).
+		SetCompressT(*opt.CompressType).
+		SetFromService(this.name).
+		SetToService(call.Service).
+		SetModule(call.Module).
+		SetMethod(call.Method).
+		SetSeq(seq)
+	if err := this.send(h, call.Req); err != nil {
 		this.l.Lock()
 		call = this.pending[seq]
 		delete(this.pending, seq)
 		this.l.Unlock()
 		if call != nil {
 			err = fmt.Errorf("%w,err:%v", WriteError, err)
-			call.Error = err
+			call.Err = err
 			call.done()
 		}
 	}
+}
+
+func (this *Client) unmarshal(coderT coder.T, data *[]byte, v any) error {
+	this.l.Lock()
+	defer this.l.Unlock()
+	return this.codec.Unmarshal(coderT, data, v)
 }

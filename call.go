@@ -5,9 +5,8 @@ type Call struct {
 	Module  string
 	Method  string
 	Req     any
-	Ret     []byte
-	ErrRet  []byte //响应回来的错误
-	Err     error  //发送触发的错误
+	Ret     any
+	Err     error
 	opt     *option
 	Done    chan *Call
 }

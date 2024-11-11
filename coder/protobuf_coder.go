@@ -1,7 +1,7 @@
 package coder
 
 import (
-	"github.com/ndsky1003/crpc/comm"
+	"github.com/ndsky1003/crpc/v2/comm"
 	"google.golang.org/protobuf/proto"
 )
 
