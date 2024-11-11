@@ -51,7 +51,7 @@ func (this *Header) SetType(t headertype.T) *Header {
 	return this
 }
 
-func (this *Header) SetCoderT(t coder.T) *Header {
+func (this *Header) SetMetaCoderT(t coder.T) *Header {
 	this.MetaCoderT = t
 	return this
 }

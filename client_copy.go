@@ -13,6 +13,12 @@ func (this *Client) Register(rcvr any) error {
 	return this.register(rcvr, "", false)
 }
 
+//		func (p *Person) Func(meta int, req int) (res int, err error)
+//		func (p *Person) Func1(meta int, req int) (err error)
+//		func (p *Person) Func2(req int) (res int, err error)
+//	 func (p *Person) Func3(req int) (err error)
+//
+// 支持以上4种结构
 func (this *Client) RegisterName(name string, rcvr any) error {
 	return this.register(rcvr, name, true)
 }
@@ -32,9 +38,10 @@ type methodType struct {
 	sync.Mutex // protects counters
 	is_func    bool
 	method     reflect.Method
+	MetaType   reflect.Type
+	ArgsNum    uint8
 	ArgType    reflect.Type
-	ReplyType  reflect.Type
-	numCalls   uint
+	RetNum     uint8
 }
 
 type module struct {
@@ -57,30 +64,16 @@ func (this *Client) register(rcvr any, name string, useName bool) error {
 	}
 	if sname == "" {
 		s := "rpc.Register: no service name for type " + m.typ.String()
-		log.Print(s)
 		return errors.New(s)
 	}
 	if !useName && !token.IsExported(sname) {
 		s := "rpc.Register: type " + sname + " is not exported"
-		log.Print(s)
 		return errors.New(s)
 	}
 	m.name = sname
 	// Install the methods
 	m.methods = suitableMethods(m.typ, logRegisterError)
 
-	if len(m.methods) == 0 {
-		str := ""
-		// To help the user, see if a pointer receiver would work.
-		method := suitableMethods(reflect.PointerTo(m.typ), false)
-		if len(method) != 0 {
-			str = "rpc.Register: type " + sname + " has no exported methods of suitable type (hint: pass a pointer to value of that type)"
-		} else {
-			str = "rpc.Register: type " + sname + " has no exported methods of suitable type"
-		}
-		log.Print(str)
-		return errors.New(str)
-	}
 	if _, dup := this.moduleMap.LoadOrStore(sname, m); dup {
 		return errors.New("rpc: service already defined: " + sname)
 	}
@@ -99,51 +92,54 @@ func suitableMethods(typ reflect.Type, logErr bool) map[string]*methodType {
 		if !method.IsExported() {
 			continue
 		}
-		// Method needs three ins: receiver, *args, *reply.
-		if mtype.NumIn() != 3 {
+		// Method needs two   ins: receiver, *args
+		// Method needs three ins: receiver,*meta, *args
+		argsNum := mtype.NumIn()
+		if !(argsNum != 2 || argsNum != 3) {
 			if logErr {
-				log.Printf("rpc.Register: method %q has %d input parameters; needs exactly three\n", mname, mtype.NumIn())
+				log.Printf("rpc.Register: method %q has %d input parameters; needs exactly three or two \n", mname, mtype.NumIn())
 			}
 			continue
 		}
+		var argsIndex int
 		// First arg need not be a pointer.
-		argType := mtype.In(1)
+		var metaType reflect.Type
+		if argsNum == 3 {
+			argsIndex++
+			metaType = mtype.In(argsIndex)
+			if !isExportedOrBuiltinType(metaType) {
+				if logErr {
+					log.Printf("rpc.Register: argument type of method %q is not exported: %q\n", mname, metaType)
+				}
+				continue
+			}
+		}
+
+		argsIndex++
+		argType := mtype.In(argsIndex)
+		// Reply type must be exported.
 		if !isExportedOrBuiltinType(argType) {
 			if logErr {
-				log.Printf("rpc.Register: argument type of method %q is not exported: %q\n", mname, argType)
+				log.Printf("rpc.Register: reply type of method %q is not exported: %q\n", mname, argType)
 			}
 			continue
 		}
-		// Second arg must be a pointer.
-		replyType := mtype.In(2)
-		if replyType.Kind() != reflect.Pointer {
+		// Method needs one or two out. (error) or (ret,error)
+		retNum := mtype.NumOut()
+		if !(retNum == 1 || retNum == 2) {
 			if logErr {
-				log.Printf("rpc.Register: reply type of method %q is not a pointer: %q\n", mname, replyType)
-			}
-			continue
-		}
-		// Reply type must be exported.
-		if !isExportedOrBuiltinType(replyType) {
-			if logErr {
-				log.Printf("rpc.Register: reply type of method %q is not exported: %q\n", mname, replyType)
-			}
-			continue
-		}
-		// Method needs one out.
-		if mtype.NumOut() != 1 {
-			if logErr {
-				log.Printf("rpc.Register: method %q has %d output parameters; needs exactly one\n", mname, mtype.NumOut())
+				log.Printf("rpc.Register: method %q has %d output parameters; needs exactly one or two\n", mname, retNum)
 			}
 			continue
 		}
 		// The return type of the method must be error.
-		if returnType := mtype.Out(0); returnType != typeOfError {
+		if returnType := mtype.Out(retNum - 1); returnType != typeOfError {
 			if logErr {
 				log.Printf("rpc.Register: return type of method %q is %q, must be error\n", mname, returnType)
 			}
 			continue
 		}
-		methods[mname] = &methodType{method: method, ArgType: argType, ReplyType: replyType}
+		methods[mname] = &methodType{method: method, ArgsNum: uint8(argsNum), MetaType: metaType, ArgType: argType, RetNum: uint8(mtype.NumOut())}
 	}
 	return methods
 }

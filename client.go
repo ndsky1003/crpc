@@ -55,6 +55,7 @@ func Dial(name, url string, opts ...*option) *Client {
 		panic("url is empty")
 	}
 	c.opt = Option().
+		SetWeight(10).
 		SetMetaCoderT(coder.JSON).
 		SetReqCoderT(coder.JSON).
 		SetResCoderT(coder.JSON).
@@ -101,15 +102,17 @@ func (this *Client) keepAlive() {
 		} else { //heart
 			heat_interval := *this.opt.HeartInterval
 			if heat_interval < 0 {
-				h := header.Get()
-				// h.InitVersionType(this.version, headertype.Ping)
-				h.SetVersion(this.version).SetType(headertype.Ping)
-				if err := this.send(h, nil); err != nil {
-					logrus.Error(err)
-					if errors.Is(err, io.ErrShortWrite) || errors.Is(err, WriteError) || errors.Is(err, codec.WriteError) {
-						this.stop(err)
+				func() {
+					h := header.Get()
+					defer h.Release()
+					h.SetVersion(this.version).SetType(headertype.Ping)
+					if err := this.send(h, nil, nil); err != nil {
+						logrus.Error(err)
+						if errors.Is(err, io.ErrShortWrite) || errors.Is(err, WriteError) || errors.Is(err, codec.WriteError) {
+							this.stop(err)
+						}
 					}
-				}
+				}()
 				time.Sleep(heat_interval * time.Second)
 			} else {
 				time.Sleep(*this.opt.CheckInterval * time.Second) //下次去尝试连接
@@ -125,20 +128,20 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 			this.l.Unlock()
 		}
 	}()
+	//verify
 	h := header.Get()
-	// h.InitVersionType(this.version, headertype.Verify)
 	h.SetVersion(this.version).SetType(headertype.Verify)
 	var secret string
 	if v := this.opt.Secret; v != nil {
 		secret = *v
 	}
-	if err = codec.Write(h, verify_req{Name: this.name, Secret: secret}); err != nil {
+	if err = codec.WriteFrame(h, nil, verify_req{Name: this.name, Weight: *this.opt.Weight, Secret: secret}); err != nil {
 		logrus.Error(err)
 		return
 	}
-	header.Release(h)
-	h, err = codec.ReadHeader()
-	if err != nil {
+	h.Release()
+
+	if h, err = codec.ReadHeader(); err != nil {
 		logrus.Error(err)
 		return err
 	}
@@ -147,10 +150,11 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 		return
 	}
 	var res verify_res
-	if err = codec.ReadBody(&res); err != nil {
+	if err = codec.ReadBody(h, &res); err != nil {
 		return
 	}
-	header.Release(h)
+	h.Release()
+
 	if !res.Success {
 		err = fmt.Errorf("%w,verify failed", VerifyError)
 		return
@@ -169,7 +173,7 @@ func (this *Client) stop(err error) {
 		call.Err = err
 		call.done()
 	}
-	if this.connecting {
+	if this.connecting && this.codec != nil {
 		this.codec.Close()
 		this.codec = nil
 	}
@@ -235,16 +239,32 @@ func (this *Client) func_call_local(moduleStr, method string, req any, ret any, 
 	}
 }
 
-func (this *Client) func_call(coderT coder.T, moduleStr, method string, reqData []byte) (ret any, err error) {
-	if v, ok := this.moduleMap.Load(moduleStr); !ok {
-		err = fmt.Errorf("%w,module:%s is not exist", FuncError, moduleStr)
+func (this *Client) func_call(h *header.Header, metaData, bodyData []byte) (ret any, err error) {
+	module_str, method := h.Module, h.Method
+	if v, ok := this.moduleMap.Load(module_str); !ok {
+		err = fmt.Errorf("%w,module:%s is not exist", FuncError, module_str)
 		return
 	} else {
 		mod := v.(*module)
 		if mtype, ok := mod.methods[method]; !ok {
-			err = fmt.Errorf("%w,module:%v,method:%v is not exist", FuncError, moduleStr, method)
+			err = fmt.Errorf("%w,module:%v,method:%v is not exist", FuncError, module_str, method)
 			return
 		} else {
+			var metav reflect.Value
+			metaIsValue := false
+			if mtype.MetaType.Kind() == reflect.Pointer {
+				metav = reflect.New(mtype.MetaType.Elem())
+			} else {
+				metav = reflect.New(mtype.MetaType)
+				metaIsValue = true
+			}
+			if err = coder.Unmarshal(h.MetaCoderT, metaData, metav.Interface()); err != nil {
+				return
+			}
+			if metaIsValue {
+				metav = metav.Elem()
+			}
+
 			var argv, replyv reflect.Value
 			argIsValue := false
 			if mtype.ArgType.Kind() == reflect.Pointer {
@@ -253,12 +273,14 @@ func (this *Client) func_call(coderT coder.T, moduleStr, method string, reqData 
 				argv = reflect.New(mtype.ArgType)
 				argIsValue = true
 			}
-			if err = this.unmarshal(coderT, &reqData, argv.Interface()); err != nil {
+			if err = coder.Unmarshal(h.ReqCoderT, bodyData, argv.Interface()); err != nil {
 				return
 			}
 			if argIsValue {
 				argv = argv.Elem()
 			}
+
+			//TODO: 到了这里
 			replyv = reflect.New(mtype.ReplyType.Elem())
 			switch mtype.ReplyType.Elem().Kind() {
 			case reflect.Map:
@@ -288,66 +310,62 @@ func (this *Client) input(codec codec.Codec) {
 	var err error
 	for err == nil {
 		var h *header.Header
-		h, err = this.codec.ReadHeader()
-		if err != nil {
+		if h, err = this.codec.ReadHeader(); err != nil {
+			err = fmt.Errorf("%w,%v", ReadError, err)
+			break
+		}
+
+		metaData := make([]byte, h.MetaLen)
+		if err = this.codec.Read(metaData); err != nil {
+			err = fmt.Errorf("%w,%v", ReadError, err)
+			break
+		}
+
+		bodyData := make([]byte, h.BodyLen)
+		if err = this.codec.Read(bodyData); err != nil {
 			err = fmt.Errorf("%w,%v", ReadError, err)
 			break
 		}
 		//logrus.Infof("receiveHeader:%+v", h)
 		switch h.Type {
 		case headertype.Ping, headertype.Pong:
-			if err = this.codec.ReadBodyData(nil); err != nil {
-				err = fmt.Errorf("%w,%v", ReadError, err)
-				break
-			}
 			if h.Type == headertype.Ping {
 				go func() {
-					defer header.Release(h)
+					defer h.Release()
 					h.Type = headertype.Pong
-					if e := this.send(h, nil); e != nil {
-						log.Println(e)
+					if e := this.send(h, nil, nil); e != nil {
+						logrus.Error(e)
 					}
 				}()
 			} else {
-				header.Release(h)
+				h.Release()
 			}
 		case headertype.Msg:
-			var data []byte
-			if err = this.codec.ReadBodyData(&data); err != nil {
-				err = fmt.Errorf("%w,%v", ReadError, err)
-				break
-			}
-			go func() {
-				defer header.Release(h)
-				defer func() {
-					if err := recover(); err != nil {
-						logrus.Error(err)
-					}
-				}()
-				if _, e := this.func_call(h.GetCoderType(), h.Module, h.Method, data); e != nil {
-					logrus.Error(e)
-				}
-			}()
-		case headertype.Req, headertype.Chunks:
-			var data []byte
-			if err = this.codec.ReadBodyData(&data); err != nil {
-				err = fmt.Errorf("%w,%v", ReadError, err)
-				break
-			}
 			go func() {
 				defer h.Release()
 				defer func() {
 					if err := recover(); err != nil {
 						logrus.Error(err)
+					}
+				}()
+				if _, e := this.func_call(h.GetCoderType(), h.Module, h.Method, bodyData); e != nil {
+					logrus.Error(e)
+				}
+			}()
+		case headertype.Req, headertype.Chunks:
+			go func() {
+				defer h.Release()
+				defer func() {
+					if err := recover(); err != nil {
 						h.Type = headertype.Res_Err_Standard
-						if e := this.send(h, err); e != nil {
+						if e := this.send(h, nil, fmt.Sprintf("%v", err)); e != nil {
 							logrus.Error(e)
 						}
 					}
 				}()
 				preHeaderType := h.Type
 				var v any
-				if ret, e := this.func_call(h.GetCoderType(), h.Module, h.Method, data); e != nil {
+				if ret, e := this.func_call(h, string(metaData), data); e != nil {
 					h.Type = headertype.Res_Err_Standard
 					v = e.Error()
 				} else {
@@ -502,17 +520,19 @@ func (this *Client) Send(server, moduleFunc string, v any, opts ...*option) erro
 	h := header.Get()
 	h.SetVersion(this.version).
 		SetType(headertype.Msg).
-		SetReqCoderT(*opt.CoderType).
-		SetCompressT(*opt.CompressType).
+		SetMetaCoderT(*opt.MetaCoderT).
+		SetReqCoderT(*opt.ReqCoderT).
+		SetResCoderT(*opt.ResCoderT).
+		SetCompressT(*opt.CompressT).
 		SetFromService(this.name).
 		SetToService(server).
-		SetModule(module).SetMethod(method)
-
+		SetModule(module).
+		SetMethod(method)
 	defer h.Release()
-	return this.send(h, v)
+	return this.send(h, opt.Meta, v)
 }
 
-func (this *Client) send(h *header.Header, v any) (err error) {
+func (this *Client) send(h *header.Header, meta, body any) (err error) {
 	this.l.Lock()
 	defer this.l.Unlock()
 	if !this.connecting {
@@ -523,16 +543,7 @@ func (this *Client) send(h *header.Header, v any) (err error) {
 		err = fmt.Errorf("%w,codec is nil", WriteError)
 		return
 	}
-	// if opt != nil && opt.IsSendRaw != nil && *opt.IsSendRaw {
-	// 	if d, ok := v.([]byte); ok {
-	// 		err = this.codec.WriteData(h, d)
-	// 	} else {
-	// 		err = fmt.Errorf("data:%v is not []byte", v)
-	// 	}
-	// } else {
-	err = this.codec.Write(h, v)
-	// }
-	return
+	return this.codec.WriteFrame(h, meta, body)
 }
 
 func (this *Client) sendCall(ht headertype.T, call *Call, opt *option) {
@@ -548,14 +559,16 @@ func (this *Client) sendCall(ht headertype.T, call *Call, opt *option) {
 	// h.InitData(this.version, ht, *opt.CoderType, *opt.CompressType, this.name, call.Service, call.Module, call.Method, seq)
 	h.SetVersion(this.version).
 		SetType(ht).
-		SetReqCoderT(*opt.CoderType).
-		SetCompressT(*opt.CompressType).
+		SetMetaCoderT(*opt.MetaCoderT).
+		SetReqCoderT(*opt.ReqCoderT).
+		SetResCoderT(*opt.ResCoderT).
+		SetCompressT(*opt.CompressT).
 		SetFromService(this.name).
 		SetToService(call.Service).
 		SetModule(call.Module).
 		SetMethod(call.Method).
 		SetSeq(seq)
-	if err := this.send(h, call.Req); err != nil {
+	if err := this.send(h, opt.Meta, call.Req); err != nil {
 		this.l.Lock()
 		call = this.pending[seq]
 		delete(this.pending, seq)
@@ -566,10 +579,4 @@ func (this *Client) sendCall(ht headertype.T, call *Call, opt *option) {
 			call.done()
 		}
 	}
-}
-
-func (this *Client) unmarshal(coderT coder.T, data *[]byte, v any) error {
-	this.l.Lock()
-	defer this.l.Unlock()
-	return this.codec.Unmarshal(coderT, data, v)
 }

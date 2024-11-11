@@ -8,7 +8,7 @@ import (
 )
 
 type option struct {
-	MetaData any //放在header中的透传信息
+	Meta any //放在header中的透传信息
 	//client
 	MetaCoderT    *coder.T       //meta数据的编解码器
 	ReqCoderT     *coder.T       //请求数据的编解码器
@@ -19,6 +19,7 @@ type option struct {
 	HeartInterval *time.Duration //心跳间隔,负数默认不开启心跳检测
 	ChunksSize    *int           //发送文件时,文件大小
 	RetErr        error          //返回一个自定义的错误
+	Weight        *int           //权重 ,负数不参只保留一个链接,且绝对值越大，权重越大
 	//server
 	Secret *string
 }
@@ -27,11 +28,11 @@ func Option() *option {
 	return new(option)
 }
 
-func (this *option) SetMetaData(metaData any) *option {
+func (this *option) SetMetaData(meta any) *option {
 	if this == nil {
 		return this
 	}
-	this.MetaData = metaData
+	this.Meta = meta
 	return this
 }
 
@@ -106,6 +107,14 @@ func (this *option) SetChunksMaxSize(t int) *option {
 	return this
 }
 
+func (this *option) SetWeight(t int) *option {
+	if this == nil {
+		return this
+	}
+	this.Weight = &t
+	return this
+}
+
 func (this *option) SetHeartInterval(t time.Duration) *option {
 	if this == nil {
 		return this
@@ -122,8 +131,8 @@ func (this *option) Merge(opts ...*option) *option {
 }
 
 func (this *option) merge(opt *option) {
-	if opt.MetaData != nil {
-		this.MetaData = opt.MetaData
+	if opt.Meta != nil {
+		this.Meta = opt.Meta
 	}
 
 	if opt.MetaCoderT != nil {
@@ -152,6 +161,10 @@ func (this *option) merge(opt *option) {
 
 	if opt.ChunksSize != nil {
 		this.ChunksSize = opt.ChunksSize
+	}
+
+	if opt.Weight != nil {
+		this.Weight = opt.Weight
 	}
 
 	if opt.HeartInterval != nil {

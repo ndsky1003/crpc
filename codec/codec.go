@@ -13,19 +13,17 @@ import (
 
 // 编解码器
 type Codec interface {
-	Write(*header.Header, any) error           //coder compress写任意解码器支持的对象
-	WriteData(*header.Header, []byte) error    //compress
-	WriteRawData(*header.Header, []byte) error //none服务器转发或者，发送文件 不需要数据处理
+	WriteFrame(*header.Header, any, any) error //coder compress写任意解码器支持的对象
+	Write([]byte) error
+	Flush() error
 
 	ReadHeader() (*header.Header, error)
-	ReadBody(*header.Header, any) error            //coder compress
-	ReadBodyData(*header.Header, *[]byte) error    //compress
-	ReadBodyRawData(*header.Header, *[]byte) error //none服务器转发或者，发送文件 不需要数据处理
+	ReadMeta(*header.Header, any) error
+	ReadBody(*header.Header, any) error
+	Read([]byte) error
+	Drop(int) error
 
 	Close() error
-
-	Marshal(coder.T, any) ([]byte, error)
-	Unmarshal(coder.T, *[]byte, any) error
 }
 
 type codec struct {
@@ -46,52 +44,59 @@ func NewCodec(conn io.ReadWriteCloser) Codec {
 	return c
 }
 
-func (this *codec) Write(h *header.Header, body any) error {
-	if body == nil {
-		return this.WriteData(h, nil)
+func (this *codec) WriteFrame(h *header.Header, meta, body any) (err error) {
+	var metaData, bodyData, headerData []byte
+	if metaData, err = coder.Marshal(h.MetaCoderT, meta); err != nil {
+		err = fmt.Errorf("%w,%v", WriteError, err)
+		return
 	}
 
-	coder, ok := coder.Coders[h.ReqCoderT]
-	if !ok {
-		return fmt.Errorf("coder:%d is not exist", h.ReqCoderT)
+	if bodyData, err = coder.Marshal(h.ReqCoderT, body); err != nil {
+		err = fmt.Errorf("%w,%v", WriteError, err)
+		return
 	}
 
-	if data, err := coder.Marshal(body); err != nil {
-		return err
-	} else {
-		return this.WriteData(h, data)
+	if bodyData, err = compressor.Zip(h.CompressT, bodyData); err != nil {
+		err = fmt.Errorf("%w,%v", WriteError, err)
+		return
 	}
-}
 
-func (this *codec) WriteData(h *header.Header, data []byte) (err error) {
-	zip, ok := compressor.Compressors[h.CompressT]
-	if !ok {
-		return fmt.Errorf("compressor:%d is not exist", h.ReqCoderT)
-	}
-	bodyData, err := zip.Zip(data)
-	if err != nil {
-		return err
-	}
+	h.MetaLen = uint32(len(metaData))
 	h.Checksum = crc32.ChecksumIEEE(bodyData)
 	h.BodyLen = uint64(len(bodyData))
-	return this.WriteRawData(h, bodyData)
+
+	headerData = h.Marshal()
+	if err = sendFrame(this.w, headerData); err != nil {
+		err = fmt.Errorf("%w,%v", WriteError, err)
+		return
+	}
+
+	if err = this.Write(metaData); err != nil {
+		return
+	}
+
+	if err = this.Write(bodyData); err != nil {
+		return
+	}
+
+	if err = this.Flush(); err != nil {
+		err = fmt.Errorf("%w,%v", WriteError, err)
+		return
+	}
+
+	return
 }
 
-// MARK 服务器转发使用
-func (this *codec) WriteRawData(h *header.Header, bodyData []byte) (err error) {
-	if err = sendFrame(this.w, h.Marshal()); err != nil {
-		err = fmt.Errorf("%w,%v", WriteError, err)
-		return
-	}
-	if err = write(this.w, bodyData); err != nil {
-		err = fmt.Errorf("%w,%v", WriteError, err)
-		return
-	}
-	if err = this.w.(*bufio.Writer).Flush(); err != nil {
+func (this *codec) Write(data []byte) (err error) {
+	if err = write(this.w, data); err != nil {
 		err = fmt.Errorf("%w,%v", WriteError, err)
 		return
 	}
 	return
+}
+
+func (this *codec) Flush() error {
+	return this.w.(*bufio.Writer).Flush()
 }
 
 func (this *codec) ReadHeader() (*header.Header, error) {
@@ -106,86 +111,64 @@ func (this *codec) ReadHeader() (*header.Header, error) {
 	return h, nil
 }
 
-func (this *codec) ReadBodyRawData(h *header.Header, data *[]byte) (err error) {
-	bodyLen := h.BodyLen
-	body := make([]byte, bodyLen)
-	if err = read(this.r, body); err != nil {
-		err = fmt.Errorf("%w,err:%v", ReadError, err)
+func (this *codec) ReadMeta(h *header.Header, meta any) (err error) {
+	if meta == nil {
+		return this.Drop(int(h.MetaLen))
+	}
+	data := make([]byte, h.MetaLen)
+	if err = this.Read(data); err != nil {
 		return
 	}
-	if data != nil {
-		*data = body
+	if err = coder.Unmarshal(h.MetaCoderT, data, meta); err != nil {
+		return fmt.Errorf("%w,err:%v", ReadError, err)
 	}
 	return
 }
 
-func (this *codec) ReadBodyData(h *header.Header, data *[]byte) (err error) {
-	if data == nil {
-		err = this.ReadBodyRawData(h, nil)
+func (this *codec) ReadBody(h *header.Header, body any) (err error) {
+	length := h.BodyLen
+	if body == nil {
+		return this.Drop(int(length))
+	}
+	bodyData := make([]byte, length)
+	if err = this.Read(bodyData); err != nil {
 		return
 	}
-	var body []byte
-	if err = this.ReadBodyRawData(h, &body); err != nil {
-		return
-	}
+
 	if h.Checksum != 0 {
-		if crc32.ChecksumIEEE(body) != h.Checksum {
+		if crc32.ChecksumIEEE(bodyData) != h.Checksum {
 			err = fmt.Errorf("%w,err:%v", ReadError, UnexpectedChecksumError)
 			return
 		}
 	}
-	unzip, ok := compressor.Compressors[h.CompressT]
-	if !ok {
-		return fmt.Errorf("%w,compressor:%d is not exist", ReadError, h.CompressT)
+
+	if bodyData, err = compressor.Unzip(h.CompressT, bodyData); err != nil {
+		return fmt.Errorf("%w,err:%v", ReadError, err)
 	}
-	*data, err = unzip.Unzip(body)
-	if err != nil {
+
+	if err = coder.Unmarshal(h.MetaCoderT, bodyData, body); err != nil {
+		return fmt.Errorf("%w,err:%v", ReadError, err)
+	}
+	return
+}
+
+func (this *codec) Read(data []byte) (err error) {
+	if len(data) == 0 {
+		return
+	}
+	if err = read(this.r, data); err != nil {
 		err = fmt.Errorf("%w,err:%v", ReadError, err)
 		return
 	}
 	return
 }
 
-func (this *codec) ReadBody(h *header.Header, v any) (err error) {
-	if v == nil {
-		if err = this.ReadBodyData(h, nil); err != nil {
-			return
-		}
-	} else {
-		var data []byte
-		if err = this.ReadBodyData(h, &data); err != nil {
-			return
-		}
-		err = this.Unmarshal(h.GetCoderType(), &data, v)
-	}
-	return
-}
-
-func (this *codec) Marshal(coderT coder.T, v any) (data []byte, err error) {
-	coder, ok := coder.Coders[coderT]
-	if !ok {
-		err = fmt.Errorf("%w,coder:%d is not exist", WriteError, coderT)
+func (this *codec) Drop(length int) (err error) {
+	if length == 0 {
 		return
 	}
-	data, err = coder.Marshal(v)
-	if err != nil {
-		err = fmt.Errorf("%w,coder:%d marshal err:%v", WriteError, coderT, err)
-	}
-	return
-}
-
-func (this *codec) Unmarshal(coderT coder.T, data *[]byte, v any) error {
-	coder, ok := coder.Coders[coderT]
-	if !ok {
-		return fmt.Errorf("%w,coder:%d is not exist", ReadError, coderT)
-	}
-	if data == nil {
-		return fmt.Errorf("%w,data is nil", ReadError)
-	}
-	if err := coder.Unmarshal(*data, v); err != nil {
-		return fmt.Errorf("%w,coder unmarshal err:%v", ReadError, err)
-	}
-	return nil
+	data := make([]byte, length)
+	return this.Read(data)
 }
 
 func (this *codec) Close() error {
