@@ -15,6 +15,7 @@ import (
 
 	"github.com/ndsky1003/crpc/v2/codec"
 	"github.com/ndsky1003/crpc/v2/coder"
+	"github.com/ndsky1003/crpc/v2/comm"
 	"github.com/ndsky1003/crpc/v2/compressor"
 	"github.com/ndsky1003/crpc/v2/header"
 	"github.com/ndsky1003/crpc/v2/header/headertype"
@@ -199,18 +200,40 @@ func (this *Client) func_call_local(moduleStr, method string, req any, ret any, 
 			err = fmt.Errorf("%w,module:%v,method:%v is not exist", FuncError, moduleStr, method)
 			return
 		} else {
-			var argv, replyv reflect.Value
-			argv = reflect.ValueOf(req)
-			replyv = reflect.ValueOf(ret)
-			if !replyv.IsValid() || replyv.Type().Kind() != reflect.Ptr || replyv.IsNil() {
-				replyv = reflect.New(mtype.ReplyType.Elem())
-				switch mtype.ReplyType.Elem().Kind() {
-				case reflect.Map:
-					replyv.Elem().Set(reflect.MakeMap(mtype.ReplyType.Elem()))
-				case reflect.Slice:
-					replyv.Elem().Set(reflect.MakeSlice(mtype.ReplyType.Elem(), 0, 0))
+			in := make([]reflect.Value, 0, 3)
+			if !mtype.is_func {
+				in = append(in, mod.rcvr)
+			}
+			if mtype.ArgsNum == 2 {
+				metav := reflect.ValueOf(opt.Meta)
+				if !metav.IsValid() {
+					metaIsValue := false
+					if mtype.MetaType.Kind() == reflect.Pointer {
+						metav = reflect.New(mtype.MetaType.Elem())
+					} else {
+						metav = reflect.New(mtype.MetaType)
+						metaIsValue = true
+					}
+					if metaIsValue {
+						metav = metav.Elem()
+					}
+				}
+				in = append(in, metav)
+			}
+			argv := reflect.ValueOf(req)
+			if !argv.IsValid() {
+				argIsValue := false
+				if mtype.ArgType.Kind() == reflect.Pointer {
+					argv = reflect.New(mtype.ArgType.Elem())
+				} else {
+					argv = reflect.New(mtype.ArgType)
+					argIsValue = true
+				}
+				if argIsValue {
+					argv = argv.Elem()
 				}
 			}
+			in = append(in, argv)
 			function := mtype.method.Func
 
 			func() { //有可能传入的参数和调用参数类型不一致
@@ -223,15 +246,22 @@ func (this *Client) func_call_local(moduleStr, method string, req any, ret any, 
 						}
 					}
 				}()
-				var returnValues []reflect.Value
-				if mtype.is_func {
-					returnValues = function.Call([]reflect.Value{argv, replyv})
-				} else {
-					returnValues = function.Call([]reflect.Value{mod.rcvr, argv, replyv})
-				}
-				errInter := returnValues[0].Interface()
+				returnValues := function.Call(in)
+				errInter := returnValues[len(returnValues)-1].Interface()
 				if errInter != nil {
 					err = errInter.(error)
+					return
+				}
+				if ret != nil && mtype.RetNum == 2 {
+					if retv := reflect.ValueOf(ret); retv.IsValid() && retv.Type().Kind() == reflect.Pointer {
+						retv = retv.Elem()
+						if real_ret := returnValues[0]; real_ret.IsValid() {
+							if real_ret.Type().Kind() == reflect.Pointer {
+								real_ret = real_ret.Elem()
+							}
+							retv.Set(real_ret)
+						}
+					}
 				}
 			}()
 			return
@@ -250,22 +280,29 @@ func (this *Client) func_call(h *header.Header, metaData, bodyData []byte) (ret 
 			err = fmt.Errorf("%w,module:%v,method:%v is not exist", FuncError, module_str, method)
 			return
 		} else {
-			var metav reflect.Value
-			metaIsValue := false
-			if mtype.MetaType.Kind() == reflect.Pointer {
-				metav = reflect.New(mtype.MetaType.Elem())
-			} else {
-				metav = reflect.New(mtype.MetaType)
-				metaIsValue = true
+			in := make([]reflect.Value, 0, 3)
+			if !mtype.is_func {
+				in = append(in, mod.rcvr)
 			}
-			if err = coder.Unmarshal(h.MetaCoderT, metaData, metav.Interface()); err != nil {
-				return
-			}
-			if metaIsValue {
-				metav = metav.Elem()
+			if mtype.ArgsNum == 2 {
+				var metav reflect.Value
+				metaIsValue := false
+				if mtype.MetaType.Kind() == reflect.Pointer {
+					metav = reflect.New(mtype.MetaType.Elem())
+				} else {
+					metav = reflect.New(mtype.MetaType)
+					metaIsValue = true
+				}
+				if err = coder.Unmarshal(h.MetaCoderT, metaData, metav.Interface()); err != nil {
+					return
+				}
+				if metaIsValue {
+					metav = metav.Elem()
+				}
+				in = append(in, metav)
 			}
 
-			var argv, replyv reflect.Value
+			var argv reflect.Value
 			argIsValue := false
 			if mtype.ArgType.Kind() == reflect.Pointer {
 				argv = reflect.New(mtype.ArgType.Elem())
@@ -279,27 +316,20 @@ func (this *Client) func_call(h *header.Header, metaData, bodyData []byte) (ret 
 			if argIsValue {
 				argv = argv.Elem()
 			}
-
-			//TODO: 到了这里
-			replyv = reflect.New(mtype.ReplyType.Elem())
-			switch mtype.ReplyType.Elem().Kind() {
-			case reflect.Map:
-				replyv.Elem().Set(reflect.MakeMap(mtype.ReplyType.Elem()))
-			case reflect.Slice:
-				replyv.Elem().Set(reflect.MakeSlice(mtype.ReplyType.Elem(), 0, 0))
-			}
+			in = append(in, argv)
 			function := mtype.method.Func
-			var returnValues []reflect.Value
-			if mtype.is_func {
-				returnValues = function.Call([]reflect.Value{argv, replyv})
-			} else {
-				returnValues = function.Call([]reflect.Value{mod.rcvr, argv, replyv})
-			}
-			errInter := returnValues[0].Interface()
+
+			returnValues := function.Call(in)
+
+			errReturn := returnValues[len(returnValues)-1]
+			errInter := errReturn.Interface()
 			if errInter != nil {
 				err = errInter.(error)
 			} else {
-				ret = replyv.Interface()
+				if len(returnValues) == 2 {
+					retValue := returnValues[0]
+					ret = retValue.Interface()
+				}
 			}
 			return
 		}
@@ -315,10 +345,13 @@ func (this *Client) input(codec codec.Codec) {
 			break
 		}
 
-		metaData := make([]byte, h.MetaLen)
-		if err = this.codec.Read(metaData); err != nil {
-			err = fmt.Errorf("%w,%v", ReadError, err)
-			break
+		var metaData []byte
+		if h.Type&headertype.Res != 0 {
+			metaData = make([]byte, h.MetaLen)
+			if err = this.codec.Read(metaData); err != nil {
+				err = fmt.Errorf("%w,%v", ReadError, err)
+				break
+			}
 		}
 
 		bodyData := make([]byte, h.BodyLen)
@@ -326,7 +359,11 @@ func (this *Client) input(codec codec.Codec) {
 			err = fmt.Errorf("%w,%v", ReadError, err)
 			break
 		}
-		//logrus.Infof("receiveHeader:%+v", h)
+
+		if bodyData, err = compressor.Unzip(h.CompressT, bodyData); err != nil {
+			err = fmt.Errorf("%w,%v", UnzipError, err)
+		}
+
 		switch h.Type {
 		case headertype.Ping, headertype.Pong:
 			if h.Type == headertype.Ping {
@@ -348,7 +385,7 @@ func (this *Client) input(codec codec.Codec) {
 						logrus.Error(err)
 					}
 				}()
-				if _, e := this.func_call(h.GetCoderType(), h.Module, h.Method, bodyData); e != nil {
+				if _, e := this.func_call(h, metaData, bodyData); e != nil {
 					logrus.Error(e)
 				}
 			}()
@@ -358,28 +395,33 @@ func (this *Client) input(codec codec.Codec) {
 				defer func() {
 					if err := recover(); err != nil {
 						h.Type = headertype.Res_Err_Standard
-						if e := this.send(h, nil, fmt.Sprintf("%v", err)); e != nil {
+						h.ResCoderT = coder.Raw
+						h.CompressT = compressor.Raw
+						if e := this.send(h, nil, []byte(fmt.Sprintf("%v", err))); e != nil {
 							logrus.Error(e)
 						}
 					}
 				}()
-				preHeaderType := h.Type
 				var v any
-				if ret, e := this.func_call(h, string(metaData), data); e != nil {
-					h.Type = headertype.Res_Err_Standard
-					v = e.Error()
+				if ret, e := this.func_call(h, metaData, bodyData); e != nil {
+					if comm.IsStandardErr(e) {
+						h.Type = headertype.Res_Err_Standard
+						h.ResCoderT = coder.Raw
+						h.CompressT = compressor.Raw
+						v = []byte(e.Error())
+					} else {
+						h.Type = headertype.Res_Err_Custom
+						v = e
+					}
 				} else {
 					h.Type = headertype.Res_Success
 					v = ret
 				}
-				if preHeaderType == headertype.Chunks { //返回值errors那些,需要使用别的res来解码
-					h.ReqCoderT = *this.opt.CoderType
-				}
-				if e := this.send(h, v); e != nil {
+				if e := this.send(h, nil, v); e != nil {
 					logrus.Error(e)
 				}
 			}()
-		case headertype.Res_Success, headertype.Res_Err_Standard: //响应
+		case headertype.Res_Success, headertype.Res_Err_Standard, headertype.Res_Err_Custom: //响应
 			seq := h.Seq
 			// fmt.Println("receive seq:", seq)
 			var call *Call
@@ -389,33 +431,42 @@ func (this *Client) input(codec codec.Codec) {
 				delete(this.pending, seq)
 				this.l.Unlock()
 			}
-			switch {
-			case call == nil:
-				err = this.codec.ReadBody(nil)
-				if err != nil {
-					err = errors.New("reading error body: " + err.Error())
+			if call != nil {
+				switch {
+				case h.Type == headertype.Res_Err_Standard:
+					var errData []byte
+					if err := coder.Unmarshal(h.ResCoderT, bodyData, &errData); err != nil {
+						err = fmt.Errorf("reading body error,%w", err)
+						call.Err = fmt.Errorf("%w,header:%+v  err:%w", ServerError, h, err)
+					} else {
+						call.Err = errors.New(string(errData)) //业务错误不需要包装
+					}
+					call.done()
+				case h.Type == headertype.Res_Err_Custom:
+					if call.opt.RetErr != nil {
+						err = coder.Unmarshal(h.ResCoderT, bodyData, call.opt.RetErr)
+						if err != nil {
+							call.Err = fmt.Errorf("reading body error,%w", err)
+						} else {
+							call.Err = call.opt.RetErr
+						}
+					} else {
+						call.Err = ErrNoReceiveType
+					}
+					call.done()
+				default:
+					err = coder.Unmarshal(h.ResCoderT, bodyData, call.Ret)
+					if err != nil {
+						call.Err = errors.New("reading body " + err.Error())
+					}
+					call.done()
 				}
-			case h.Type == headertype.Res_Err_Standard:
-				var errStr string
-				if err := this.codec.ReadBody(&errStr); err != nil {
-					err = errors.New("reading error body: " + err.Error())
-					call.Err = fmt.Errorf("%w,header:%+v  err:%v", ServerError, h, err)
-				} else {
-					// call.Error = fmt.Errorf("%w,err:%v", ServerError, errStr)
-					call.Err = errors.New(errStr) //业务错误不需要包装
-				}
-				call.done()
-			default:
-				err = this.codec.ReadBody(call.Ret)
-				if err != nil {
-					call.Err = errors.New("reading body " + err.Error())
-				}
-				call.done()
+
 			}
-			header.Release(h)
+			h.Release()
 		default:
 			err = fmt.Errorf("headerType:%v,can not handle,please call author", h.Type)
-			header.Release(h)
+			h.Release()
 		}
 	}
 	logrus.Errorf("read err:%+v\n", err)

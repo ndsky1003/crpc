@@ -21,8 +21,8 @@ func (this *Client) SendFile(server string, moduleFunc string, save_path string,
 	}
 
 	opt := Option().Merge(this.opt).Merge(opts...).
-		SetCoderType(coder.FilePack).
-		SetCompressorType(compressor.Raw).
+		SetReqCoderT(coder.FilePack).
+		SetCompressT(compressor.Raw).
 		SetTimeout(60 * 60 * 2)
 	chunks_size := *opt.ChunksSize
 

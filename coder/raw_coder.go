@@ -15,10 +15,15 @@ func (this *raw_coder) Marshal(v any) ([]byte, error) {
 	if data, ok := v.([]byte); ok {
 		return data, nil
 	} else {
-		return nil, errors.New("CoderRawBodyMustData")
+		return nil, errors.New("CoderRawBodyMustData Marshal")
 	}
 }
 
 func (this *raw_coder) Unmarshal(data []byte, v any) error {
-	return nil
+	if d, ok := v.(*[]byte); ok {
+		*d = data
+		return nil
+	} else {
+		return errors.New("CoderRawBodyMustData Unmarshal")
+	}
 }
