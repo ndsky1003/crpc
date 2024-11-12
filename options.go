@@ -12,7 +12,7 @@ type option struct {
 	//client
 	MetaCoderT    *coder.T       //meta数据的编解码器
 	ReqCoderT     *coder.T       //请求数据的编解码器
-	ResCoderT     *coder.T       //响应数据的编解码器,还是自定义错误的解码器
+	ResCoderT     *coder.T       //响应数据的编解码器,还是自定义错误的解码器,之所以请求与返回需要不同的编解码,是有文件上传的场景,上传有个自定义的编码方式
 	CompressT     *compressor.T  //压缩数据的编解码器
 	Timeout       *time.Duration //这个发送的超时时间,版本1是中心超市,现在做客户端超时
 	CheckInterval *time.Duration //检测是否连接的间隔
@@ -175,6 +175,35 @@ func (this *option) merge(opt *option) {
 		this.RetErr = opt.RetErr
 	}
 
+	if opt.Secret != nil {
+		this.Secret = opt.Secret
+	}
+}
+
+type option_server struct {
+	Secret *string
+}
+
+func OptionServer() *option_server {
+	return new(option_server)
+}
+
+func (this *option_server) SetSecret(s string) *option_server {
+	if this == nil {
+		return this
+	}
+	this.Secret = &s
+	return this
+}
+
+func (this *option_server) Merge(opts ...*option_server) *option_server {
+	for _, opt := range opts {
+		this.merge(opt)
+	}
+	return this
+}
+
+func (this *option_server) merge(opt *option_server) {
 	if opt.Secret != nil {
 		this.Secret = opt.Secret
 	}

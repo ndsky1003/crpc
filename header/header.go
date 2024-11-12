@@ -2,7 +2,6 @@ package header
 
 import (
 	"encoding/binary"
-	"sync"
 
 	"github.com/ndsky1003/crpc/v2/coder"
 	"github.com/ndsky1003/crpc/v2/comm"
@@ -24,7 +23,6 @@ const (
 // |  uint32 | uint16   | uint16  | uint16  | uint16  |   uint16   |  uvarint+ string  | uvarint+ string | uvarint + string  | uvarint +string |  uvarint |  uint32  |   uvarint  |  uint32  |
 // +---------+----------+---------+---------+---------+------------+-------------------+-----------------+-------------------+-----------------+----------+----------+------------+----------+
 type Header struct {
-	sync.RWMutex
 	Version     uint32
 	Type        headertype.T
 	MetaCoderT  coder.T //meta coder //body在使用场景的情况下可能使用json,但是meta可能追求性能使用msgp来序列化
@@ -113,8 +111,6 @@ func (this *Header) SetChecksum(s uint32) *Header {
 
 // Marshal will encode request header into a byte slice
 func (r *Header) Marshal() []byte {
-	r.RLock()
-	defer r.RUnlock()
 	idx := 0
 	header := make([]byte, MaxHeaderSize+len(r.FromService)+len(r.ToService)+len(r.Module)+len(r.Method))
 
@@ -158,8 +154,6 @@ func (r *Header) Marshal() []byte {
 
 // Unmarshal will decode request header into a byte slice
 func (r *Header) Unmarshal(data []byte) (err error) {
-	r.Lock()
-	defer r.Unlock()
 	if len(data) == 0 {
 		return comm.UnmarshalError
 	}
@@ -213,24 +207,10 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 	return
 }
 
-func (r *Header) GetCoderType() coder.T {
-	r.RLock()
-	defer r.RUnlock()
-	return r.ReqCoderT
-}
-
-func (r *Header) GetCompressType() compressor.T {
-	r.RLock()
-	defer r.RUnlock()
-	return r.CompressT
-}
-
 func (r *Header) Release() {
 	Release(r)
 }
 func (r *Header) Reset() {
-	r.Lock()
-	defer r.Unlock()
 	r.Version = 0
 	r.Type = 0
 	r.MetaCoderT = 0

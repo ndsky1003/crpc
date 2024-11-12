@@ -13,7 +13,8 @@ import (
 
 // 编解码器
 type Codec interface {
-	WriteFrame(*header.Header, any, any) error //coder compress写任意解码器支持的对象
+	WriteFrame(*header.Header, any, any) error              //coder compress写任意解码器支持的对象
+	WriteFrameRawData(*header.Header, []byte, []byte) error //服务器透传
 	Write([]byte) error
 	Flush() error
 
@@ -66,6 +67,30 @@ func (this *codec) WriteFrame(h *header.Header, meta, body any) (err error) {
 	h.BodyLen = uint64(len(bodyData))
 
 	headerData = h.Marshal()
+	if err = sendFrame(this.w, headerData); err != nil {
+		err = fmt.Errorf("%w,%v", WriteError, err)
+		return
+	}
+
+	if err = this.Write(metaData); err != nil {
+		return
+	}
+
+	if err = this.Write(bodyData); err != nil {
+		return
+	}
+
+	if err = this.Flush(); err != nil {
+		err = fmt.Errorf("%w,%v", WriteError, err)
+		return
+	}
+
+	return
+}
+
+func (this *codec) WriteFrameRawData(h *header.Header, metaData, bodyData []byte) (err error) {
+
+	headerData := h.Marshal()
 	if err = sendFrame(this.w, headerData); err != nil {
 		err = fmt.Errorf("%w,%v", WriteError, err)
 		return

@@ -7,7 +7,6 @@ import (
 	"net"
 	"sync"
 
-	"github.com/ndsky1003/crpc/options"
 	"github.com/ndsky1003/crpc/v2/codec"
 	"github.com/ndsky1003/crpc/v2/header"
 	"github.com/sirupsen/logrus"
@@ -15,20 +14,16 @@ import (
 
 type server struct {
 	sync.RWMutex
-	services     map[string]*service
-	Secret       string
+	services     map[string]*service_mgr
+	opt          *option_server
 	codecGenFunc codecFunc
 }
 
-func NewServer(opts ...*options.ServerOptions) *server {
+func NewServer(opts ...*option_server) *server {
 	c := &server{
-		services: map[string]*service{},
+		services: map[string]*service_mgr{},
 	}
-	opt := options.Server().Merge(opts...)
-	//属性设置开始
-	if opt.Secret != nil {
-		c.Secret = *opt.Secret
-	}
+	c.opt = OptionServer().Merge(opts...)
 	c.codecGenFunc = func(conn io.ReadWriteCloser) (codec.Codec, error) {
 		return codec.NewCodec(conn), nil
 	}
@@ -84,42 +79,54 @@ func (this *server) getService(name string) (*service, error) {
 	}
 	this.Lock()
 	defer this.Unlock()
-	if s, ok := this.services[name]; ok {
-		return s, nil
+	if sg, ok := this.services[name]; ok {
+		return sg.RandOne(), nil
 	} else {
 		return nil, fmt.Errorf("service name:%s not exist", name)
 	}
 }
 
-func (this *server) addService(name string, si *service) error {
-	if name == "" {
+func (this *server) addService(s *service) error {
+	if s.name == "" {
 		return errors.New("service name is empty")
 	}
 	this.Lock()
 	defer this.Unlock()
-	if _, ok := this.services[name]; ok {
-		return fmt.Errorf("service name:%s exist", name)
+	sg, ok := this.services[s.name]
+	if ok {
+		sg.addService(s)
+	} else {
+		sg = &service_mgr{}
+		sg.addService(s)
+		this.services[s.name] = sg
 	}
-	this.services[name] = si
-	logrus.Info("add service:", name)
 	return nil
 }
 
-func (this *server) removeService(name string) error {
-	if name == "" {
+func (this *server) removeService(s *service, isClose bool) error {
+	if s.name == "" {
 		return errors.New("service name is empty")
 	}
 	this.Lock()
 	defer this.Unlock()
-	delete(this.services, name)
+	sg, ok := this.services[s.name]
+	if ok {
+		if w, err := sg.removeService(s, isClose); err == nil && w == 0 {
+			delete(this.services, s.name)
+		}
+	}
 	return nil
 }
 
-func (this *server) WriteRawData(name string, h *header.Header, data []byte) error {
+func (this *server) WriteRawData(name string, h *header.Header, meta_data, data []byte) error {
 	s, err := this.getService(name)
 	if err != nil {
 		return err
 	}
-	go s.WriteRawData(h, data)
+	if s == nil {
+
+		return fmt.Errorf("%v,暂无可用的service", name)
+	}
+	go s.WriteRawData(h, meta_data, data)
 	return nil
 }
