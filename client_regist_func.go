@@ -23,9 +23,9 @@ func (this *Client) register_func(name string, function any) error {
 	if mtype.Kind() != reflect.Func {
 		return errors.New("rpc.Register: " + name + " not a func")
 	}
-	// Method needs three ins:  *args, *reply.
+	// Method needs three ins: *meta *args.
 	argsNum := mtype.NumIn()
-	if !(argsNum != 1 || argsNum != 2) {
+	if !(argsNum == 1 || argsNum == 2) {
 		err := fmt.Errorf("rpc.Register: method %q has %d input parameters; needs exactly 1 or 2\n", mname, mtype.NumIn())
 		return err
 	}
@@ -38,9 +38,9 @@ func (this *Client) register_func(name string, function any) error {
 			err := fmt.Errorf("rpc.Register: argument type of method %q is not exported: %q\n", mname, metaType)
 			return err
 		}
+		argsIndex++
 	}
 	// Second arg must be a pointer.
-	argsIndex++
 	argType := mtype.In(argsIndex)
 	// Reply type must be exported.
 	if !isExportedOrBuiltinType(argType) {

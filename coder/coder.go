@@ -22,6 +22,27 @@ const (
 	Sonic
 )
 
+func (t T) String() string {
+	switch t {
+	case JSON:
+		return "JSON"
+	case MsgPack:
+		return "MsgPack"
+	case FilePack:
+		return "FilePack"
+	case Protobuf:
+		return "Protobuf"
+	case Msgp:
+		return "Msgp"
+	case MsgPackJSONTag:
+		return "MsgPackJSONTag"
+	case Sonic:
+		return "Sonic"
+	default:
+		return "Raw"
+	}
+}
+
 var coders = map[T]Coder{
 	JSON:           new_json_coder(),
 	MsgPack:        new_msgpack(),
@@ -35,12 +56,12 @@ var coders = map[T]Coder{
 func Marshal(t T, v any) (data []byte, err error) {
 	coder, ok := coders[t]
 	if !ok {
-		err = fmt.Errorf("coder:%d is not exist", t)
+		err = fmt.Errorf("coder:%v is not exist", t)
 		return
 	}
 	data, err = coder.Marshal(v)
 	if err != nil {
-		err = fmt.Errorf("coder:%d marshal err:%v", t, err)
+		err = fmt.Errorf("coder:%v marshal err:%v", t, err)
 	}
 	return
 }

@@ -54,7 +54,7 @@ func (this *service) serve() {
 	if _, err = this.codec.ReadMetaData(h); err != nil {
 		h.Release()
 		this.close(false)
-		logrus.Error("read meta data err:%v", err)
+		logrus.Errorf("read meta data err:%v", err)
 		return
 	}
 
@@ -62,7 +62,7 @@ func (this *service) serve() {
 	if err != nil {
 		h.Release()
 		this.close(false)
-		logrus.Error("read body data err:%v", err)
+		logrus.Errorf("read body data err:%v", err)
 		return
 	}
 	var req verify_req

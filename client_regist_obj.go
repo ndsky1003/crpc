@@ -95,7 +95,7 @@ func suitableMethods(typ reflect.Type, logErr bool) map[string]*methodType {
 		// Method needs two   ins: receiver, *args
 		// Method needs three ins: receiver,*meta, *args
 		argsNum := mtype.NumIn()
-		if !(argsNum != 2 || argsNum != 3) {
+		if !(argsNum == 2 || argsNum == 3) {
 			if logErr {
 				log.Printf("rpc.Register: method %q has %d input parameters; needs exactly three or two \n", mname, mtype.NumIn())
 			}

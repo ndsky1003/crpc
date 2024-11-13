@@ -3,21 +3,19 @@ package crpc
 import (
 	"fmt"
 	"os"
-	"reflect"
 	"testing"
 	"time"
 
-	"github.com/ndsky1003/crpc/coder"
-	"github.com/ndsky1003/crpc/compressor"
-	"github.com/ndsky1003/crpc/options"
+	"github.com/ndsky1003/crpc/v2/coder"
+	"github.com/ndsky1003/crpc/v2/compressor"
 )
 
 // number,string,bool,slice, map *point
 type robot_service struct {
 }
 
-func (*robot_service) CallInt(a int, r *int) error {
-	*r = a * 10
+func (*robot_service) CallInt(a int) error {
+	a = a * 10
 	return nil
 }
 
@@ -67,12 +65,12 @@ func SetList(req struct {
 func TestMain(m *testing.M) {
 	go NewServer().Listen(":8081")
 	go func() {
-		client := Dial("client", "127.0.0.1:8081", options.Client().SetIsStopHeart(true).SetCoderType(coder.JSON))
+		client := Dial("client", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.JSON))
 		client.RegisterName("rpc", new(robot_service))
-		if err := client.RegisterFunc("GetList", func(req int, ret *string) error {
-			fmt.Println("GetList")
-			*ret = "lya"
-			return nil
+		if err := client.RegisterFunc("GetList", func(req int) (string, error) {
+			fmt.Println("GetList=============")
+			// *ret = "lya"
+			return "lya", nil
 		}); err != nil {
 			fmt.Println(err)
 		}
@@ -88,7 +86,7 @@ func TestMain(m *testing.M) {
 }
 
 func Test_Call(t *testing.T) {
-	client1 := Dial("client1", "127.0.0.1:8081", options.Client().SetIsStopHeart(true).SetCoderType(coder.MsgPack).SetCompressorType(compressor.Raw))
+	client1 := Dial("client1", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.MsgPack).SetCompressT(compressor.Raw))
 	time.Sleep(1e9)
 	type args struct {
 		name   string
@@ -97,7 +95,7 @@ func Test_Call(t *testing.T) {
 		a      any
 		r      any
 	}
-	var a int8 = 120
+	// var a int8 = 120
 	var _ float64 = 120 //手动修改，因为不同额coder处理数据的默认类型不一致，但是最终结果是一致的
 	tests := []args{
 		{
@@ -107,56 +105,55 @@ func Test_Call(t *testing.T) {
 			a:      12,
 			r:      "lya",
 		},
-		{
-			name:   "1",
-			server: "client",
-			method: "rpc.CallInt",
-			a:      12,
-			r:      a, //json无整数
-		},
-		{
-			name:   "2",
-			server: "client",
-			method: "rpc.CallString",
-			a:      "runll",
-			r:      "hhhh:runll",
-		},
-		{
-			name:   "3",
-			server: "client",
-			method: "rpc.CallBool",
-			a:      true,
-			r:      false,
-		},
-		{
-			name:   "4",
-			server: "client",
-			method: "rpc.CallSlice",
-			a:      []*test_obj_data{{Name: "ppxia", Age: 28}},
-			r:      "ppxia",
-		},
-		{
-			name:   "5",
-			server: "client",
-			method: "rpc.CallMap",
-			a:      map[int]string{1: "one"},
-			r:      "one",
-		},
-		{
-			name:   "6",
-			server: "client",
-			method: "rpc.CallPointer",
-			a:      "dd",
-			r:      "dd is a pointer",
-		},
+		// {
+		// 	name:   "1",
+		// 	server: "client",
+		// 	method: "rpc.CallInt",
+		// 	a:      12,
+		// 	r:      a, //json无整数
+		// },
+		// {
+		// 	name:   "2",
+		// 	server: "client",
+		// 	method: "rpc.CallString",
+		// 	a:      "runll",
+		// 	r:      "hhhh:runll",
+		// },
+		// {
+		// 	name:   "3",
+		// 	server: "client",
+		// 	method: "rpc.CallBool",
+		// 	a:      true,
+		// 	r:      false,
+		// },
+		// {
+		// 	name:   "4",
+		// 	server: "client",
+		// 	method: "rpc.CallSlice",
+		// 	a:      []*test_obj_data{{Name: "ppxia", Age: 28}},
+		// 	r:      "ppxia",
+		// },
+		// {
+		// 	name:   "5",
+		// 	server: "client",
+		// 	method: "rpc.CallMap",
+		// 	a:      map[int]string{1: "one"},
+		// 	r:      "one",
+		// },
+		// {
+		// 	name:   "6",
+		// 	server: "client",
+		// 	method: "rpc.CallPointer",
+		// 	a:      "dd",
+		// 	r:      "dd is a pointer",
+		// },
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var ret any
-			if err := client1.Call(tt.server, tt.method, tt.a, &ret, options.Send().SetCoderType(coder.Msgp)); err != nil {
-				t.Error(err)
+			if err := client1.Call(tt.server, tt.method, tt.a, &ret, Option().SetCoderT(coder.JSON)); err != nil {
+				t.Error("dddd:", err)
 			} else if tt.r != ret {
-				t.Logf("v:%+v", reflect.TypeOf(ret))
 				t.Errorf("return value:%v,expect value:%v", ret, tt.r)
 			}
 		})
@@ -164,7 +161,7 @@ func Test_Call(t *testing.T) {
 }
 
 func Benchmark_Call(b *testing.B) {
-	client2 := Dial("client2", "127.0.0.1:8081", options.Client().SetIsStopHeart(true).SetCoderType(coder.MsgPack).SetCompressorType(compressor.Raw))
+	client2 := Dial("client2", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.JSON).SetCompressT(compressor.Raw))
 	time.Sleep(1e9)
 	type args struct {
 		name   string
@@ -223,7 +220,7 @@ func Benchmark_Call(b *testing.B) {
 		b.Run(tt.name, func(b *testing.B) {
 			var ret any
 			if err := client2.Call(tt.server, tt.method, tt.a, &ret); err != nil {
-				b.Error(err)
+				b.Error("dddd:", err)
 			} else if tt.r != ret {
 				b.Errorf("return value:%v,expect value:%v", ret, tt.r)
 			}

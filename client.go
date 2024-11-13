@@ -101,11 +101,16 @@ func (this *Client) keepAlive() {
 			}
 		} else { //heart
 			heat_interval := *this.opt.HeartInterval
-			if heat_interval < 0 {
+			if heat_interval > 0 {
 				func() {
 					h := header.Get()
 					defer h.Release()
-					h.SetVersion(this.version).SetType(headertype.Ping)
+					h.SetVersion(this.version).
+						SetType(headertype.Ping).
+						SetMetaCoderT(*this.opt.MetaCoderT).
+						SetReqCoderT(*this.opt.ReqCoderT).
+						SetResCoderT(*this.opt.ResCoderT).
+						SetCompressT(*this.opt.CompressT)
 					if err := this.send(h, nil, nil); err != nil {
 						logrus.Error(err)
 						if errors.Is(err, io.ErrShortWrite) || errors.Is(err, WriteError) || errors.Is(err, codec.WriteError) {
@@ -130,11 +135,17 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 	}()
 	//verify
 	h := header.Get()
-	h.SetVersion(this.version).SetType(headertype.Verify)
 	var secret string
 	if v := this.opt.Secret; v != nil {
 		secret = *v
 	}
+
+	h.SetVersion(this.version).SetType(headertype.Verify).
+		SetMetaCoderT(*this.opt.MetaCoderT).
+		SetReqCoderT(*this.opt.ReqCoderT).
+		SetResCoderT(*this.opt.ResCoderT).
+		SetCompressT(*this.opt.CompressT)
+
 	if err = codec.WriteFrame(h, nil, verify_req{Name: this.name, Weight: *this.opt.Weight, Secret: secret}); err != nil {
 		logrus.Error(err)
 		return
@@ -145,7 +156,8 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 		logrus.Error(err)
 		return err
 	}
-	if h.Type != headertype.Verify {
+
+	if h.Type != headertype.Res_Success {
 		err = fmt.Errorf("%w,headertype:%d is invalid", VerifyError, h.Type)
 		return
 	}
@@ -352,23 +364,24 @@ func (this *Client) input(codec codec.Codec) {
 	var err error
 	for err == nil {
 		var h *header.Header
-		if h, err = this.codec.ReadHeader(); err != nil {
+		if h, err = codec.ReadHeader(); err != nil {
 			err = fmt.Errorf("%w,%v", ReadError, err)
 			break
 		}
 
 		var metaData, bodyData []byte
 		if h.Type&headertype.Res != 0 {
-			if metaData, err = this.codec.ReadMetaData(h); err != nil {
+			if metaData, err = codec.ReadMetaData(h); err != nil {
 				err = fmt.Errorf("%w,%v", ServerError, err)
 				break
 			}
 		}
 
-		if bodyData, err = this.codec.ReadBodyData(h); err != nil {
+		if bodyData, err = codec.ReadBodyData(h); err != nil {
 			err = fmt.Errorf("%w,%v", ServerError, err)
 			break
 		}
+		// logrus.Infof("header:%+v,metaData:%+v,bodyData:%+v\n", h, string(metaData), string(bodyData))
 
 		go func() {
 			defer h.Release()
@@ -387,7 +400,6 @@ func (this *Client) input(codec codec.Codec) {
 				logrus.Errorf("err:%v,header:%v\n", err, h)
 			}
 		}()
-
 	}
 	logrus.Errorf("read err:%+v\n", err)
 	this.stop(err)

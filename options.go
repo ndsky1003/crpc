@@ -52,6 +52,16 @@ func (this *option) SetSecret(s string) *option {
 	return this
 }
 
+func (this *option) SetCoderT(t coder.T) *option {
+	if this == nil {
+		return this
+	}
+	this.MetaCoderT = &t
+	this.ReqCoderT = &t
+	this.ResCoderT = &t
+	return this
+}
+
 func (this *option) SetMetaCoderT(t coder.T) *option {
 	if this == nil {
 		return this
@@ -59,6 +69,7 @@ func (this *option) SetMetaCoderT(t coder.T) *option {
 	this.MetaCoderT = &t
 	return this
 }
+
 func (this *option) SetReqCoderT(t coder.T) *option {
 	if this == nil {
 		return this
@@ -115,6 +126,7 @@ func (this *option) SetWeight(t int) *option {
 	return this
 }
 
+// < 0 将没有心跳
 func (this *option) SetHeartInterval(t time.Duration) *option {
 	if this == nil {
 		return this
