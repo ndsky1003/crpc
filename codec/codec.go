@@ -9,6 +9,7 @@ import (
 	"github.com/ndsky1003/crpc/v2/coder"
 	"github.com/ndsky1003/crpc/v2/compressor"
 	"github.com/ndsky1003/crpc/v2/header"
+	"github.com/ndsky1003/crpc/v2/header/headertype"
 )
 
 // 编解码器
@@ -19,10 +20,11 @@ type Codec interface {
 	Flush() error
 
 	ReadHeader() (*header.Header, error)
-	ReadMeta(*header.Header, any) error
-	ReadBody(*header.Header, any) error
-	Read([]byte) error
-	Drop(int) error
+	ReadMetaData(*header.Header) ([]byte, error)
+	ReadMetaRawData(*header.Header) ([]byte, error)
+	ReadBodyData(*header.Header) ([]byte, error)
+	ReadBodyRawData(*header.Header) ([]byte, error)
+	// Read([]byte) error
 
 	Close() error
 }
@@ -35,7 +37,7 @@ type codec struct {
 
 func NewCodec(conn io.ReadWriteCloser) Codec {
 	if conn == nil {
-		panic("conn is nil")
+		panic("crpc conn is nil")
 	}
 	c := &codec{
 		conn: conn,
@@ -45,21 +47,38 @@ func NewCodec(conn io.ReadWriteCloser) Codec {
 	return c
 }
 
+// if meta == nil ,编码结果为空,不会进行编码,防止传递过多无用信息
+// 因为json的编码nil,也会占用4个字节:null
 func (this *codec) WriteFrame(h *header.Header, meta, body any) (err error) {
 	var metaData, bodyData, headerData []byte
-	if metaData, err = coder.Marshal(h.MetaCoderT, meta); err != nil {
-		err = fmt.Errorf("%w,%v", WriteError, err)
-		return
+	if meta != nil {
+		if metaData, err = coder.Marshal(h.MetaCoderT, meta); err != nil {
+			err = fmt.Errorf("%w,%v", WriteError, err)
+			return
+		}
 	}
 
-	if bodyData, err = coder.Marshal(h.ReqCoderT, body); err != nil {
-		err = fmt.Errorf("%w,%v", WriteError, err)
-		return
-	}
+	if h.Type == headertype.Res_Err_Standard {
+		errstr := ""
+		switch body.(type) {
+		case error:
+			errstr = body.(error).Error()
+		case string:
+			errstr = body.(string)
+		default:
+			errstr = fmt.Sprintf("illegal standard err: %v", body)
+		}
+		bodyData = []byte(errstr)
+	} else {
+		if bodyData, err = coder.Marshal(h.GetMarshalType(), body); err != nil {
+			err = fmt.Errorf("%w,%v", WriteError, err)
+			return
+		}
 
-	if bodyData, err = compressor.Zip(h.CompressT, bodyData); err != nil {
-		err = fmt.Errorf("%w,%v", WriteError, err)
-		return
+		if bodyData, err = compressor.Zip(h.CompressT, bodyData); err != nil {
+			err = fmt.Errorf("%w,%v", WriteError, err)
+			return
+		}
 	}
 
 	h.MetaLen = uint32(len(metaData))
@@ -72,8 +91,10 @@ func (this *codec) WriteFrame(h *header.Header, meta, body any) (err error) {
 		return
 	}
 
-	if err = this.Write(metaData); err != nil {
-		return
+	if meta != nil {
+		if err = this.Write(metaData); err != nil {
+			return
+		}
 	}
 
 	if err = this.Write(bodyData); err != nil {
@@ -136,48 +157,40 @@ func (this *codec) ReadHeader() (*header.Header, error) {
 	return h, nil
 }
 
-func (this *codec) ReadMeta(h *header.Header, meta any) (err error) {
-	if meta == nil {
-		return this.Drop(int(h.MetaLen))
-	}
-	data := make([]byte, h.MetaLen)
-	if err = this.Read(data); err != nil {
-		return
-	}
-	if err = coder.Unmarshal(h.MetaCoderT, data, meta); err != nil {
-		return fmt.Errorf("%w,err:%v", ReadError, err)
-	}
+func (this *codec) ReadMetaData(h *header.Header) (data []byte, err error) {
+	data = make([]byte, h.MetaLen)
+	err = this.read(data)
+	return
+}
+func (this *codec) ReadMetaRawData(h *header.Header) (data []byte, err error) {
+	return this.ReadMetaData(h)
+}
+func (this *codec) ReadBodyRawData(h *header.Header) (data []byte, err error) {
+	data = make([]byte, h.BodyLen)
+	err = this.read(data)
 	return
 }
 
-func (this *codec) ReadBody(h *header.Header, body any) (err error) {
-	length := h.BodyLen
-	if body == nil {
-		return this.Drop(int(length))
-	}
-	bodyData := make([]byte, length)
-	if err = this.Read(bodyData); err != nil {
+func (this *codec) ReadBodyData(h *header.Header) (data []byte, err error) {
+	if data, err = this.ReadBodyRawData(h); err != nil {
 		return
 	}
 
 	if h.Checksum != 0 {
-		if crc32.ChecksumIEEE(bodyData) != h.Checksum {
+		if crc32.ChecksumIEEE(data) != h.Checksum {
 			err = fmt.Errorf("%w,err:%v", ReadError, UnexpectedChecksumError)
 			return
 		}
 	}
 
-	if bodyData, err = compressor.Unzip(h.CompressT, bodyData); err != nil {
-		return fmt.Errorf("%w,err:%v", ReadError, err)
-	}
-
-	if err = coder.Unmarshal(h.MetaCoderT, bodyData, body); err != nil {
-		return fmt.Errorf("%w,err:%v", ReadError, err)
+	if data, err = compressor.Unzip(h.CompressT, data); err != nil {
+		err = fmt.Errorf("%w,err:%v", ReadError, err)
+		return
 	}
 	return
 }
 
-func (this *codec) Read(data []byte) (err error) {
+func (this *codec) read(data []byte) (err error) {
 	if len(data) == 0 {
 		return
 	}
@@ -186,14 +199,6 @@ func (this *codec) Read(data []byte) (err error) {
 		return
 	}
 	return
-}
-
-func (this *codec) Drop(length int) (err error) {
-	if length == 0 {
-		return
-	}
-	data := make([]byte, length)
-	return this.Read(data)
 }
 
 func (this *codec) Close() error {

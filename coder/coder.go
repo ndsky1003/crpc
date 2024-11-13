@@ -46,6 +46,9 @@ func Marshal(t T, v any) (data []byte, err error) {
 }
 
 func Unmarshal(t T, data []byte, v any) error {
+	if v == nil {
+		return nil
+	}
 	coder, ok := coders[t]
 	if !ok {
 		return fmt.Errorf("coder:%d is not exist", t)

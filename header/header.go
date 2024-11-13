@@ -226,3 +226,11 @@ func (r *Header) Reset() {
 	r.BodyLen = 0
 	r.Checksum = 0
 }
+
+func (h *Header) GetMarshalType() coder.T {
+	t := h.ReqCoderT
+	if h.Type&headertype.Res != 0 {
+		t = h.ResCoderT
+	}
+	return t
+}

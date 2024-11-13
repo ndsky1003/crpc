@@ -13,5 +13,5 @@ var (
 	FuncError               = errors.New("FuncError")
 	ReqTimeOutError         = errors.New("ReqTimeoutError")
 	ErrCoderRawBodyMustData = errors.New("CoderRawBodyMustData")
-	ErrNoReceiveType        = errors.New("ErrNoReceiveType")
+	ErrCusstomNoReceiveType = errors.New("ErrCusstomNoReceiveType")
 )

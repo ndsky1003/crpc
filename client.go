@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"reflect"
 	"strings"
@@ -50,10 +49,10 @@ func Dial(name, url string, opts ...*option) *Client {
 		pending: make(map[uint64]*Call),
 	}
 	if name == "" {
-		panic("name is empty")
+		panic("crpc Dail name is empty")
 	}
 	if url == "" {
-		panic("url is empty")
+		panic("crpc Dail url is empty")
 	}
 	c.opt = Option().
 		SetWeight(10).
@@ -61,7 +60,7 @@ func Dial(name, url string, opts ...*option) *Client {
 		SetReqCoderT(coder.JSON).
 		SetResCoderT(coder.JSON).
 		SetCompressT(compressor.Raw).
-		SetTimeout(-1).
+		SetTimeout(10).
 		SetCheckInterval(1).
 		SetHeartInterval(10).
 		SetChunksMaxSize(defaultChunksSize).Merge(opts...)
@@ -150,8 +149,21 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 		err = fmt.Errorf("%w,headertype:%d is invalid", VerifyError, h.Type)
 		return
 	}
+
+	if _, err = codec.ReadMetaData(h); err != nil {
+		err = fmt.Errorf("%w,read meta err:%w", VerifyError, err)
+		return
+	}
+
+	var bodyData []byte
+	if bodyData, err = codec.ReadBodyData(h); err != nil {
+		err = fmt.Errorf("%w,read body err:%w", VerifyError, err)
+		return
+	}
+
 	var res verify_res
-	if err = codec.ReadBody(h, &res); err != nil {
+	if err = coder.Unmarshal(h.ResCoderT, bodyData, &res); err != nil {
+		err = fmt.Errorf("%w,verify bodyData Unmarshal err:%w", VerifyError, err)
 		return
 	}
 	h.Release()
@@ -345,132 +357,104 @@ func (this *Client) input(codec codec.Codec) {
 			break
 		}
 
-		var metaData []byte
+		var metaData, bodyData []byte
 		if h.Type&headertype.Res != 0 {
-			metaData = make([]byte, h.MetaLen)
-			if err = this.codec.Read(metaData); err != nil {
-				err = fmt.Errorf("%w,%v", ReadError, err)
+			if metaData, err = this.codec.ReadMetaData(h); err != nil {
+				err = fmt.Errorf("%w,%v", ServerError, err)
 				break
 			}
 		}
 
-		bodyData := make([]byte, h.BodyLen)
-		if err = this.codec.Read(bodyData); err != nil {
-			err = fmt.Errorf("%w,%v", ReadError, err)
+		if bodyData, err = this.codec.ReadBodyData(h); err != nil {
+			err = fmt.Errorf("%w,%v", ServerError, err)
 			break
 		}
 
-		if bodyData, err = compressor.Unzip(h.CompressT, bodyData); err != nil {
-			err = fmt.Errorf("%w,%v", UnzipError, err)
-		}
-
-		switch h.Type {
-		case headertype.Ping, headertype.Pong:
-			if h.Type == headertype.Ping {
-				go func() {
-					defer h.Release()
-					h.Type = headertype.Pong
-					if e := this.send(h, nil, nil); e != nil {
-						logrus.Error(e)
-					}
-				}()
-			} else {
-				h.Release()
-			}
-		case headertype.Msg:
-			go func() {
-				defer h.Release()
-				defer func() {
-					if err := recover(); err != nil {
-						logrus.Error(err)
-					}
-				}()
-				if _, e := this.func_call(h, metaData, bodyData); e != nil {
-					logrus.Error(e)
-				}
-			}()
-		case headertype.Req, headertype.Chunks:
-			go func() {
-				defer h.Release()
-				defer func() {
-					if err := recover(); err != nil {
+		go func() {
+			defer h.Release()
+			defer func() {
+				if err := recover(); err != nil {
+					if h.Type == headertype.Req || h.Type == headertype.Chunks {
 						h.Type = headertype.Res_Err_Standard
-						h.ResCoderT = coder.Raw
-						h.CompressT = compressor.Raw
-						if e := this.send(h, nil, []byte(fmt.Sprintf("%v", err))); e != nil {
+						if e := this.send(h, nil, fmt.Errorf("%v", err)); e != nil {
 							logrus.Error(e)
 						}
 					}
-				}()
-				var v any
-				if ret, e := this.func_call(h, metaData, bodyData); e != nil {
-					if comm.IsStandardErr(e) {
-						h.Type = headertype.Res_Err_Standard
-						h.ResCoderT = coder.Raw
-						h.CompressT = compressor.Raw
-						v = []byte(e.Error())
-					} else {
-						h.Type = headertype.Res_Err_Custom
-						v = e
-					}
-				} else {
-					h.Type = headertype.Res_Success
-					v = ret
-				}
-				if e := this.send(h, nil, v); e != nil {
-					logrus.Error(e)
+					logrus.Error(err)
 				}
 			}()
-		case headertype.Res_Success, headertype.Res_Err_Standard, headertype.Res_Err_Custom: //响应
-			seq := h.Seq
-			// fmt.Println("receive seq:", seq)
-			var call *Call
-			if this.version == h.Version {
-				this.l.Lock()
-				call = this.pending[seq]
-				delete(this.pending, seq)
-				this.l.Unlock()
+			if err := this.HandleMsg(h, metaData, bodyData); err != nil {
+				logrus.Errorf("err:%v,header:%v\n", err, h)
 			}
-			if call != nil {
-				switch {
-				case h.Type == headertype.Res_Err_Standard:
-					var errData []byte
-					if err := coder.Unmarshal(h.ResCoderT, bodyData, &errData); err != nil {
-						err = fmt.Errorf("reading body error,%w", err)
-						call.Err = fmt.Errorf("%w,header:%+v  err:%w", ServerError, h, err)
-					} else {
-						call.Err = errors.New(string(errData)) //业务错误不需要包装
-					}
-					call.done()
-				case h.Type == headertype.Res_Err_Custom:
-					if call.opt.RetErr != nil {
-						err = coder.Unmarshal(h.ResCoderT, bodyData, call.opt.RetErr)
-						if err != nil {
-							call.Err = fmt.Errorf("reading body error,%w", err)
-						} else {
-							call.Err = call.opt.RetErr
-						}
-					} else {
-						call.Err = ErrNoReceiveType
-					}
-					call.done()
-				default:
-					err = coder.Unmarshal(h.ResCoderT, bodyData, call.Ret)
-					if err != nil {
-						call.Err = errors.New("reading body " + err.Error())
-					}
-					call.done()
-				}
+		}()
 
-			}
-			h.Release()
-		default:
-			err = fmt.Errorf("headerType:%v,can not handle,please call author", h.Type)
-			h.Release()
-		}
 	}
 	logrus.Errorf("read err:%+v\n", err)
 	this.stop(err)
+}
+
+func (this *Client) HandleMsg(h *header.Header, metaData, bodyData []byte) (err error) {
+	switch h.Type {
+	case headertype.Msg:
+		if _, e := this.func_call(h, metaData, bodyData); e != nil {
+			logrus.Error(e)
+		}
+	case headertype.Req, headertype.Chunks:
+		var v any
+		if ret, e := this.func_call(h, metaData, bodyData); e != nil {
+			if comm.IsStandardErr(e) {
+				h.Type = headertype.Res_Err_Standard
+				v = e
+			} else {
+				h.Type = headertype.Res_Err_Custom
+				v = e
+			}
+		} else {
+			h.Type = headertype.Res_Success
+			v = ret
+		}
+		if e := this.send(h, nil, v); e != nil {
+			logrus.Error(e)
+		}
+	case headertype.Res_Success, headertype.Res_Err_Standard, headertype.Res_Err_Custom: //响应
+		seq := h.Seq
+		var call *Call
+		if this.version == h.Version {
+			this.l.Lock()
+			call = this.pending[seq]
+			delete(this.pending, seq)
+			this.l.Unlock()
+		}
+		if call != nil {
+			switch {
+			case h.Type == headertype.Res_Err_Standard:
+				call.Err = errors.New(string(bodyData))
+				call.done()
+			case h.Type == headertype.Res_Err_Custom:
+				if call.opt.RetErr != nil {
+					err = coder.Unmarshal(h.GetMarshalType(), bodyData, call.opt.RetErr)
+					if err != nil {
+						call.Err = fmt.Errorf("unmarshal body error,%w", err)
+					} else {
+						call.Err = call.opt.RetErr
+					}
+				} else {
+					call.Err = ErrCusstomNoReceiveType
+				}
+				call.done()
+			default:
+				err = coder.Unmarshal(h.GetMarshalType(), bodyData, call.Ret)
+				if err != nil {
+					call.Err = errors.New("reading body " + err.Error())
+				}
+				call.done()
+			}
+		}
+	case headertype.Pong:
+	default:
+		err = fmt.Errorf("headerType:%v,can not handle,please call author", h.Type)
+	}
+	return
 }
 
 func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string, err error) {
@@ -531,7 +515,7 @@ func (this *Client) _go(ht headertype.T, server string, moduleFunc string, req, 
 		done = make(chan *Call, 10) // buffered.
 	} else {
 		if cap(done) == 0 {
-			log.Panic("crpc: done channel is unbuffered")
+			panic("crpc: done channel is unbuffered")
 		}
 	}
 	call.Done = done

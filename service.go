@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/ndsky1003/crpc/v2/codec"
+	"github.com/ndsky1003/crpc/v2/coder"
 	"github.com/ndsky1003/crpc/v2/header"
 	"github.com/ndsky1003/crpc/v2/header/headertype"
 	"github.com/sirupsen/logrus"
@@ -50,25 +51,33 @@ func (this *service) serve() {
 		logrus.Error("first frame header is error")
 		return
 	}
-	if err := this.codec.Drop(int(h.MetaLen)); err != nil {
+	if _, err = this.codec.ReadMetaData(h); err != nil {
 		h.Release()
 		this.close(false)
-		logrus.Error("drop meta data err:%v", err)
+		logrus.Error("read meta data err:%v", err)
 		return
 	}
 
-	var req verify_req
-	if err = this.codec.ReadBody(h, &req); err != nil {
+	bodyData, err := this.codec.ReadBodyData(h)
+	if err != nil {
 		h.Release()
-		logrus.Errorf("first frame body is error:%v", err)
-		this.codec.Close()
+		this.close(false)
+		logrus.Error("read body data err:%v", err)
 		return
 	}
+	var req verify_req
+	if err = coder.Unmarshal(h.ReqCoderT, bodyData, &req); err != nil {
+		h.Release()
+		this.close(false)
+		logrus.Errorf("first frame body is error:%v", err)
+		return
+	}
+
 	if s := this.server.opt.Secret; s != nil {
 		if req.Secret != *s {
 			h.Release()
 			this.close(false)
-			logrus.Errorf("secret  is invalid,please change")
+			logrus.Errorf("secret is invalid,please change")
 		}
 	}
 
@@ -81,6 +90,7 @@ func (this *service) serve() {
 		return
 	}
 	this.Lock()
+	h.Type = headertype.Res_Success
 	if err = this.codec.WriteFrame(h, nil, verify_res{Success: true}); err != nil {
 		h.Release()
 		logrus.Errorf("write verify res is err :%v", err)
@@ -93,25 +103,22 @@ func (this *service) serve() {
 		h, e := this.codec.ReadHeader()
 		if e != nil {
 			err = e
-			continue
+			break
 		}
 
-		var metaData []byte
+		var metaData, bodyData []byte
 		if h.Type&headertype.Res != 0 {
-			metaData = make([]byte, h.MetaLen)
-			if err = this.codec.Read(metaData); err != nil {
+			if metaData, err = this.codec.ReadMetaRawData(h); err != nil {
 				err = fmt.Errorf("%w,%v", ServerError, err)
-				continue
+				break
 			}
 		}
 
-		bodyData := make([]byte, h.BodyLen)
-		if err = this.codec.Read(bodyData); err != nil {
+		if bodyData, err = this.codec.ReadBodyRawData(h); err != nil {
 			err = fmt.Errorf("%w,%v", ServerError, err)
-			continue
+			break
 		}
 
-		//logrus.Infof("data:%+v", data)
 		switch h.Type {
 		case headertype.Ping:
 			h.Type = headertype.Pong
@@ -121,9 +128,10 @@ func (this *service) serve() {
 			}()
 		case headertype.Req, headertype.Chunks, headertype.Msg: //forward
 			if e := this.server.WriteRawData(h.ToService, h, metaData, bodyData); e != nil {
+				e = fmt.Errorf("%w,%v", ServerError, e)
 				logrus.Error(e)
 				h.Type = headertype.Res_Err_Standard
-				go this.Write(h, e.Error())
+				go this.Write(h, e)
 			}
 		case headertype.Res_Success, headertype.Res_Err_Custom, headertype.Res_Err_Standard: //back forward
 			if e := this.server.WriteRawData(h.FromService, h, metaData, bodyData); e != nil {

@@ -13,7 +13,7 @@ const (
 	Msg              //MQ
 	Chunks           //发送文件的时候
 
-	Res = Res_Success | Res_Err_Standard | Res_Err_Custom //最底部
+	Res = Res_Success | Res_Err_Standard | Res_Err_Custom | Pong //最底部
 )
 
 var m = map[T]string{

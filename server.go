@@ -51,11 +51,11 @@ func (this *server) Listen(url string) {
 
 func (this *server) listen(url string) {
 	if this == nil {
-		panic("server is nil")
+		panic("crpc server is nil")
 	}
 	listen, err := net.Listen("tcp", url)
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("crpc server listen err:%w", err))
 	}
 	for {
 		conn, err := listen.Accept()
