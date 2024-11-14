@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -268,6 +269,8 @@ func (this *Client) func_call_local(moduleStr, method string, req any, ret any, 
 						if !ok1 {
 							err = fmt.Errorf("%v", recover_err)
 						}
+						err = fmt.Errorf("panic:%w ,stack:%v", err, string(debug.Stack()))
+						fmt.Println(err)
 					}
 				}()
 				returnValues := function.Call(in)
