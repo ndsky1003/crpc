@@ -99,15 +99,15 @@ func (this *service) serve() {
 	}
 	h.Release()
 	this.Unlock()
-	for err == nil {
-		h, e := this.codec.ReadHeader()
-		if e != nil {
-			err = e
+	h = nil
+	for {
+		if h, err = this.codec.ReadHeader(); err != nil {
+			err = fmt.Errorf("%w,%v", ServerError, err)
 			break
 		}
 
 		var metaData, bodyData []byte
-		if h.Type&headertype.Res != 0 {
+		if h.Type&headertype.Res == 0 {
 			if metaData, err = this.codec.ReadMetaRawData(h); err != nil {
 				err = fmt.Errorf("%w,%v", ServerError, err)
 				break
@@ -124,14 +124,14 @@ func (this *service) serve() {
 			h.Type = headertype.Pong
 			go func() {
 				defer h.Release()
-				this.Write(h, nil)
+				this.WriteFrame(h, nil, nil)
 			}()
 		case headertype.Req, headertype.Chunks, headertype.Msg: //forward
 			if e := this.server.WriteRawData(h.ToService, h, metaData, bodyData); e != nil {
 				e = fmt.Errorf("%w,%v", ServerError, e)
 				logrus.Error(e)
 				h.Type = headertype.Res_Err_Standard
-				go this.Write(h, e)
+				go this.WriteFrame(h, nil, e)
 			}
 		case headertype.Res_Success, headertype.Res_Err_Custom, headertype.Res_Err_Standard: //back forward
 			if e := this.server.WriteRawData(h.FromService, h, metaData, bodyData); e != nil {
@@ -140,14 +140,17 @@ func (this *service) serve() {
 		default: //pong
 		}
 	}
+
+	if h != nil && h.Type.IsReq() { //req
+		h.Type = headertype.Res_Err_Standard
+		if err := this.WriteFrame(h, nil, err); err != nil {
+			err = fmt.Errorf("%w,%v", ServerError, err)
+			logrus.Error(err)
+		}
+	}
 	this.Close(true)
 	logrus.Errorf("service:%s is die,err:%v\n", this.name, err)
 }
-
-//	func (this *service) close() error {
-//		this.server.removeService(this.name)
-//		return this.codec.Close()
-//	}
 
 func (this *service) Close(removeFromMgr bool) error {
 	this.Lock()
@@ -175,8 +178,9 @@ func (this *service) WriteRawData(h *header.Header, meta_data, data []byte) erro
 	defer this.Unlock()
 	return this.codec.WriteFrameRawData(h, meta_data, data)
 }
-func (this *service) Write(h *header.Header, v any) error {
+
+func (this *service) WriteFrame(h *header.Header, meta, v any) error {
 	this.Lock()
 	defer this.Unlock()
-	return this.codec.WriteFrame(h, nil, v)
+	return this.codec.WriteFrame(h, meta, v)
 }

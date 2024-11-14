@@ -362,15 +362,15 @@ func (this *Client) func_call(h *header.Header, metaData, bodyData []byte) (ret 
 
 func (this *Client) input(codec codec.Codec) {
 	var err error
+	var h *header.Header
 	for err == nil {
-		var h *header.Header
 		if h, err = codec.ReadHeader(); err != nil {
 			err = fmt.Errorf("%w,%v", ReadError, err)
 			break
 		}
 
 		var metaData, bodyData []byte
-		if h.Type&headertype.Res != 0 {
+		if h.Type&headertype.Res == 0 {
 			if metaData, err = codec.ReadMetaData(h); err != nil {
 				err = fmt.Errorf("%w,%v", ServerError, err)
 				break
@@ -381,9 +381,8 @@ func (this *Client) input(codec codec.Codec) {
 			err = fmt.Errorf("%w,%v", ServerError, err)
 			break
 		}
-		// logrus.Infof("header:%+v,metaData:%+v,bodyData:%+v\n", h, string(metaData), string(bodyData))
 
-		go func() {
+		go func(h *header.Header, metaData, bodyData []byte) {
 			defer h.Release()
 			defer func() {
 				if err := recover(); err != nil {
@@ -396,16 +395,23 @@ func (this *Client) input(codec codec.Codec) {
 					logrus.Error(err)
 				}
 			}()
-			if err := this.HandleMsg(h, metaData, bodyData); err != nil {
+			if err := this.handle_msg(h, metaData, bodyData); err != nil {
 				logrus.Errorf("err:%v,header:%v\n", err, h)
 			}
-		}()
+		}(h, metaData, bodyData)
 	}
-	logrus.Errorf("read err:%+v\n", err)
+	if h != nil && h.Type.IsReq() { //req
+		h.Type = headertype.Res_Err_Standard
+		if err := this.send(h, nil, err); err != nil {
+			logrus.Error(err)
+		}
+	}
+	time.Sleep(1e5) //上一个消息尚未处理完,下一个消息就报错退出了,call有概率会拿到第二个的错误消息,应为第二个处理的更快,这里加一个临界值
+	logrus.Errorf("%v read err:%+v\n", this.name, err)
 	this.stop(err)
 }
 
-func (this *Client) HandleMsg(h *header.Header, metaData, bodyData []byte) (err error) {
+func (this *Client) handle_msg(h *header.Header, metaData, bodyData []byte) (err error) {
 	switch h.Type {
 	case headertype.Msg:
 		if _, e := this.func_call(h, metaData, bodyData); e != nil {

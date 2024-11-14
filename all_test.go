@@ -67,8 +67,8 @@ func TestMain(m *testing.M) {
 	go func() {
 		client := Dial("client", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.JSON))
 		client.RegisterName("rpc", new(robot_service))
-		if err := client.RegisterFunc("GetList", func(req int) (string, error) {
-			fmt.Println("GetList=============")
+		if err := client.RegisterFunc("GetList", func(meta, req int) (string, error) {
+			fmt.Printf("GetList=============req:%v,meta:%v\n", req, meta)
 			// *ret = "lya"
 			return "lya", nil
 		}); err != nil {
@@ -86,12 +86,13 @@ func TestMain(m *testing.M) {
 }
 
 func Test_Call(t *testing.T) {
-	client1 := Dial("client1", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.MsgPack).SetCompressT(compressor.Raw))
+	client1 := Dial("client1", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.JSON).SetCompressT(compressor.Raw))
 	time.Sleep(1e9)
 	type args struct {
 		name   string
 		server string
 		method string
+		m      any
 		a      any
 		r      any
 	}
@@ -102,6 +103,7 @@ func Test_Call(t *testing.T) {
 			name:   "func1",
 			server: "client",
 			method: "func.GetList",
+			m:      170,
 			a:      12,
 			r:      "lya",
 		},
@@ -151,7 +153,7 @@ func Test_Call(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var ret any
-			if err := client1.Call(tt.server, tt.method, tt.a, &ret, Option().SetCoderT(coder.JSON)); err != nil {
+			if err := client1.Call(tt.server, tt.method, tt.a, &ret, Option().SetCoderT(coder.JSON).SetMetaData(tt.m)); err != nil {
 				t.Error("dddd:", err)
 			} else if tt.r != ret {
 				t.Errorf("return value:%v,expect value:%v", ret, tt.r)

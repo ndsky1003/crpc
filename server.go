@@ -130,3 +130,15 @@ func (this *server) WriteRawData(name string, h *header.Header, meta_data, data 
 	go s.WriteRawData(h, meta_data, data)
 	return nil
 }
+
+func (this *server) WriteFrame(name string, h *header.Header, meta, body any) error {
+	s, err := this.getService(name)
+	if err != nil {
+		return err
+	}
+	if s == nil {
+		return fmt.Errorf("%v,暂无可用的service", name)
+	}
+	go s.WriteFrame(h, meta, body)
+	return nil
+}

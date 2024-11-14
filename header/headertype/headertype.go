@@ -14,7 +14,16 @@ const (
 	Chunks           //发送文件的时候
 
 	Res = Res_Success | Res_Err_Standard | Res_Err_Custom | Pong //最底部
+
 )
+
+func (this T) IsRes() bool {
+	return this&Res != 0
+}
+
+func (this T) IsReq() bool {
+	return !this.IsRes()
+}
 
 var m = map[T]string{
 	Ping:             "Ping",
