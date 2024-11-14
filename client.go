@@ -107,10 +107,10 @@ func (this *Client) keepAlive() {
 					defer h.Release()
 					h.SetVersion(this.version).
 						SetType(headertype.Ping).
-						SetMetaCoderT(*this.opt.MetaCoderT).
-						SetReqCoderT(*this.opt.ReqCoderT).
-						SetResCoderT(*this.opt.ResCoderT).
-						SetCompressT(*this.opt.CompressT)
+						SetMetaCoderT(coder.JSON).
+						SetReqCoderT(coder.JSON).
+						SetResCoderT(coder.JSON).
+						SetCompressT(compressor.Raw)
 					if err := this.send(h, nil, nil); err != nil {
 						logrus.Error(err)
 						if errors.Is(err, io.ErrShortWrite) || errors.Is(err, WriteError) || errors.Is(err, codec.WriteError) {
@@ -141,10 +141,10 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 	}
 
 	h.SetVersion(this.version).SetType(headertype.Verify).
-		SetMetaCoderT(*this.opt.MetaCoderT).
-		SetReqCoderT(*this.opt.ReqCoderT).
-		SetResCoderT(*this.opt.ResCoderT).
-		SetCompressT(*this.opt.CompressT)
+		SetMetaCoderT(coder.JSON).
+		SetReqCoderT(coder.JSON).
+		SetResCoderT(coder.JSON).
+		SetCompressT(compressor.Raw)
 
 	if err = codec.WriteFrame(h, nil, verify_req{Name: this.name, Weight: *this.opt.Weight, Secret: secret}); err != nil {
 		logrus.Error(err)
@@ -463,7 +463,7 @@ func (this *Client) handle_msg(h *header.Header, metaData, bodyData []byte) (err
 			default:
 				err = coder.Unmarshal(h.GetMarshalType(), bodyData, call.Ret)
 				if err != nil {
-					call.Err = errors.New("reading body " + err.Error())
+					call.Err = fmt.Errorf("%v unmarshal body error,%w", this.name, err)
 				}
 				call.done()
 			}
