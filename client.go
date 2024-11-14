@@ -308,7 +308,7 @@ func (this *Client) func_call(h *header.Header, metaData, bodyData []byte) (ret 
 			if !mtype.is_func {
 				in = append(in, mod.rcvr)
 			}
-			if mtype.ArgsNum == 2 {
+			if mtype.ArgsNum == 3 {
 				var metav reflect.Value
 				metaIsValue := false
 				if mtype.MetaType.Kind() == reflect.Pointer {
@@ -325,7 +325,6 @@ func (this *Client) func_call(h *header.Header, metaData, bodyData []byte) (ret 
 				}
 				in = append(in, metav)
 			}
-
 			var argv reflect.Value
 			argIsValue := false
 			if mtype.ArgType.Kind() == reflect.Pointer {
@@ -370,7 +369,7 @@ func (this *Client) input(codec codec.Codec) {
 		}
 
 		var metaData, bodyData []byte
-		if h.Type&headertype.Res == 0 {
+		if /*h.Type&headertype.Res == 0 &&*/ h.Type.IsReq() {
 			if metaData, err = codec.ReadMetaData(h); err != nil {
 				err = fmt.Errorf("%w,%v", ServerError, err)
 				break

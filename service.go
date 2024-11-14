@@ -107,7 +107,7 @@ func (this *service) serve() {
 		}
 
 		var metaData, bodyData []byte
-		if h.Type&headertype.Res == 0 {
+		if /*h.Type&headertype.Res == 0*/ h.Type.IsReq() {
 			if metaData, err = this.codec.ReadMetaRawData(h); err != nil {
 				err = fmt.Errorf("%w,%v", ServerError, err)
 				break

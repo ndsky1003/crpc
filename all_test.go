@@ -14,8 +14,10 @@ import (
 type robot_service struct {
 }
 
-func (*robot_service) CallInt(a int) error {
+func (*robot_service) CallInt(req TestOBJ, a int) error {
+	fmt.Printf("===========CallInt:%v,%+v", a, req)
 	a = a * 10
+	fmt.Println("CallInt:", a)
 	return nil
 }
 
@@ -28,7 +30,7 @@ func (*robot_service) CallBool(a bool, r *bool) error {
 	*r = !a
 	return nil
 }
-func (*robot_service) CallSlice(a []*test_obj_data, r *string) error {
+func (*robot_service) CallSlice(a []*TestOBJ, r *string) error {
 	fmt.Printf("a:%+v\n", a)
 	*r = a[0].Name
 	return nil
@@ -46,12 +48,12 @@ func (*robot_service) CallPointer(a *string, r *string) error {
 	return nil
 }
 
-type test_obj_data struct {
+type TestOBJ struct {
 	Name string
 	Age  int
 }
 
-func (this *test_obj_data) String() string {
+func (this *TestOBJ) String() string {
 	return fmt.Sprintf("%+v", *this)
 }
 
@@ -67,10 +69,9 @@ func TestMain(m *testing.M) {
 	go func() {
 		client := Dial("client", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.JSON))
 		client.RegisterName("rpc", new(robot_service))
-		if err := client.RegisterFunc("GetList", func(meta, req int) (string, error) {
+		if err := client.RegisterFunc("GetList", func(meta, req int) (*TestOBJ, error) {
 			fmt.Printf("GetList=============req:%v,meta:%v\n", req, meta)
-			// *ret = "lya"
-			return "lya", nil
+			return &TestOBJ{Name: "lya", Age: 178}, nil
 		}); err != nil {
 			fmt.Println(err)
 		}
@@ -86,7 +87,7 @@ func TestMain(m *testing.M) {
 }
 
 func Test_Call(t *testing.T) {
-	client1 := Dial("client1", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.JSON).SetCompressT(compressor.Raw))
+	client1 := Dial("client1", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.Msgp).SetCompressT(compressor.Raw))
 	time.Sleep(1e9)
 	type args struct {
 		name   string
@@ -102,7 +103,7 @@ func Test_Call(t *testing.T) {
 		{
 			name:   "func1",
 			server: "client",
-			method: "func.GetList",
+			method: "rpc.CallInt",
 			m:      170,
 			a:      12,
 			r:      "lya",
@@ -152,11 +153,12 @@ func Test_Call(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var ret any
-			if err := client1.Call(tt.server, tt.method, tt.a, &ret, Option().SetCoderT(coder.JSON).SetMetaData(tt.m)); err != nil {
+			var ret TestOBJ
+			var meta = TestOBJ{Name: "Meta", Age: 18}
+			if err := client1.Call(tt.server, tt.method, tt.a, &ret, Option().SetCoderT(coder.JSON).SetMetaData(meta)); err != nil {
 				t.Error("dddd:", err)
 			} else if tt.r != ret {
-				t.Errorf("return value:%v,expect value:%v", ret, tt.r)
+				t.Errorf("return value:%+v,expect value:%v", ret, tt.r)
 			}
 		})
 	}
@@ -199,7 +201,7 @@ func Benchmark_Call(b *testing.B) {
 			name:   "4",
 			server: "client",
 			method: "rpc.CallSlice",
-			a:      []*test_obj_data{{Name: "ppxia", Age: 28}},
+			a:      []*TestOBJ{{Name: "ppxia", Age: 28}},
 			r:      "ppxia",
 		},
 		{

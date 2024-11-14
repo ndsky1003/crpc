@@ -228,9 +228,9 @@ func (r *Header) Reset() {
 }
 
 func (h *Header) GetMarshalType() coder.T {
-	t := h.ReqCoderT
-	if h.Type&headertype.Res != 0 {
-		t = h.ResCoderT
+	if h.Type.IsReq() {
+		return h.ReqCoderT
+	} else {
+		return h.ResCoderT
 	}
-	return t
 }

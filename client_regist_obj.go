@@ -41,6 +41,7 @@ type methodType struct {
 	MetaType   reflect.Type
 	ArgsNum    uint8
 	ArgType    reflect.Type
+	RetType    reflect.Type
 	RetNum     uint8
 }
 
@@ -139,7 +140,11 @@ func suitableMethods(typ reflect.Type, logErr bool) map[string]*methodType {
 			}
 			continue
 		}
-		methods[mname] = &methodType{method: method, ArgsNum: uint8(argsNum), MetaType: metaType, ArgType: argType, RetNum: uint8(mtype.NumOut())}
+		mt := &methodType{method: method, ArgsNum: uint8(argsNum), MetaType: metaType, ArgType: argType, RetNum: uint8(retNum)}
+		if retNum == 2 {
+			mt.RetType = mtype.Out(0)
+		}
+		methods[mname] = mt
 	}
 	return methods
 }

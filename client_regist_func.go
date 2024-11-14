@@ -65,16 +65,20 @@ func (this *Client) register_func(name string, function any) error {
 		Type: mtype,
 		Func: mvalue,
 	}
+	mt := &methodType{method: method, is_func: true, ArgsNum: uint8(argsNum), MetaType: metaType, ArgType: argType, RetNum: uint8(retNum)}
+	if retNum == 2 {
+		mt.RetType = mtype.Out(0)
+	}
 	if v, ok := this.moduleMap.Load(func_module_name); ok {
 		if vv, ok1 := v.(*module); ok1 {
-			vv.methods[mname] = &methodType{method: method, is_func: true, ArgsNum: uint8(argsNum), MetaType: metaType, ArgType: argType, RetNum: uint8(mtype.NumOut())}
+			vv.methods[mname] = mt
 		}
 	} else {
 		func_module := &module{
 			name:    func_module_name,
 			methods: map[string]*methodType{},
 		}
-		func_module.methods[mname] = &methodType{method: method, is_func: true, ArgsNum: uint8(argsNum), MetaType: metaType, ArgType: argType, RetNum: uint8(mtype.NumOut())}
+		func_module.methods[mname] = mt
 		this.moduleMap.Store(func_module_name, func_module)
 	}
 	return nil
