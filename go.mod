@@ -5,6 +5,7 @@ go 1.22
 require (
 	github.com/bytedance/sonic v1.12.4
 	github.com/golang/snappy v0.0.4
+	github.com/ndsky1003/buffer v1.0.0
 	github.com/ndsky1003/crpc v1.0.14
 	github.com/sirupsen/logrus v1.9.0
 	github.com/tinylib/msgp v1.1.9

@@ -19,6 +19,8 @@ github.com/klauspost/cpuid/v2 v2.0.9/go.mod h1:FInQzS24/EEf25PyTYn52gqo7WaD8xa02
 github.com/klauspost/cpuid/v2 v2.2.9 h1:66ze0taIn2H33fBvCkXuv9BmCwDfafmiIVpKV9kKGuY=
 github.com/klauspost/cpuid/v2 v2.2.9/go.mod h1:rqkxqrZ1EhYM9G+hXH7YdowN5R5RGN6NK4QwQ3WMXF8=
 github.com/knz/go-libedit v1.10.1/go.mod h1:MZTVkCWyz0oBc7JOWP3wNAzd002ZbM/5hgShxwh4x8M=
+github.com/ndsky1003/buffer v1.0.0 h1:g1dTFAxe5t461+p9kVDSuiymFXoxSQyYv03YVlEfwp4=
+github.com/ndsky1003/buffer v1.0.0/go.mod h1:uqzrgaowCkfIjpvetHaM+XHQemOg+IlPnhu0ZWhkBG8=
 github.com/ndsky1003/crpc v1.0.14 h1:fz4O6hC5OAjXiqFh4xKRids7slg9QV006+/ZSbWOFmE=
 github.com/ndsky1003/crpc v1.0.14/go.mod h1:X1h2Y5CwxTRR9h14mB8/DupSUUXT/RQf7eIXD5HJI3o=
 github.com/philhofer/fwd v1.1.2 h1:bnDivRJ1EWPjUIRXV5KfORO897HTbpFAQddBdE8t7Gw=

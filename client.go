@@ -229,7 +229,7 @@ func (this *Client) func_call_local(moduleStr, method string, req any, ret any, 
 			if !mtype.is_func {
 				in = append(in, mod.rcvr)
 			}
-			if mtype.ArgsNum == 2 {
+			if (!mtype.is_func && mtype.ArgsNum == 3) || (mtype.is_func && mtype.ArgsNum == 2) {
 				metav := reflect.ValueOf(opt.Meta)
 				if !metav.IsValid() {
 					metaIsValue := false
@@ -311,7 +311,7 @@ func (this *Client) func_call(h *header.Header, metaData, bodyData []byte) (ret 
 			if !mtype.is_func {
 				in = append(in, mod.rcvr)
 			}
-			if mtype.ArgsNum == 3 {
+			if (!mtype.is_func && mtype.ArgsNum == 3) || (mtype.is_func && mtype.ArgsNum == 2) {
 				var metav reflect.Value
 				metaIsValue := false
 				if mtype.MetaType.Kind() == reflect.Pointer {

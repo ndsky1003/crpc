@@ -6,6 +6,7 @@ package coder
 import (
 	"bytes"
 
+	"github.com/ndsky1003/buffer"
 	"github.com/tinylib/msgp/msgp"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -18,12 +19,9 @@ func new_msgp_coder() *msgp_coder {
 }
 
 func (this *msgp_coder) Marshal(v any) ([]byte, error) {
-	buf := get_buffer()
-	defer release_buffer(buf)
+	buf := buffer.Get()
+	defer buf.Release()
 	if value, ok := v.(msgp.Encodable); ok {
-		// buf := this.pool.Get().(*bytes.Buffer)
-		// defer this.pool.Put(buf)
-		// defer buf.Reset()
 		if err := msgp.Encode(buf, value); err != nil {
 			return nil, err
 		}
@@ -41,12 +39,9 @@ func (this *msgp_coder) Marshal(v any) ([]byte, error) {
 }
 
 func (this *msgp_coder) Unmarshal(data []byte, v any) error {
-	buf := get_buffer()
-	defer release_buffer(buf)
+	buf := buffer.Get()
+	defer buf.Release()
 	if value, ok := v.(msgp.Decodable); ok {
-		// buf := this.pool.Get().(*bytes.Buffer)
-		// defer this.pool.Put(buf)
-		// defer buf.Reset()
 		if _, err := buf.Write(data); err != nil {
 			return err
 		}
