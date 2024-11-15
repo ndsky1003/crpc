@@ -19,7 +19,7 @@ const (
 	Protobuf
 	Msgp
 	MsgPackJSONTag
-	Sonic
+	// Sonic
 )
 
 func (t T) String() string {
@@ -36,8 +36,8 @@ func (t T) String() string {
 		return "Msgp"
 	case MsgPackJSONTag:
 		return "MsgPackJSONTag"
-	case Sonic:
-		return "Sonic"
+	// case Sonic:
+	// 	return "Sonic"
 	default:
 		return "Raw"
 	}
@@ -50,7 +50,7 @@ var coders = map[T]Coder{
 	FilePack:       new_file_pack(),
 	Protobuf:       new_protobuf_pack(),
 	Msgp:           new_msgp_coder(),
-	Sonic:          new_sonic_coder(),
+	// Sonic:          new_sonic_coder(),
 }
 
 func Marshal(t T, v any) (data []byte, err error) {

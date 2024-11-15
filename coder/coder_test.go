@@ -13,8 +13,8 @@ var test_coders = map[T]Coder{
 	MsgPackJSONTag: new_msgpack_with_tag("json"),
 	// FilePack:       new_file_pack(),
 	// Protobuf:       new_protobuf_pack(),
-	Msgp:  new_msgp_coder(),
-	Sonic: new_sonic_coder(),
+	Msgp: new_msgp_coder(),
+	// Sonic: new_sonic_coder(),
 }
 
 func Test_int(t *testing.T) {
