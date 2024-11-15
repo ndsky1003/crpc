@@ -17,7 +17,7 @@ type Option struct {
 	Timeout       *time.Duration //这个发送的超时时间,版本1是中心超市,现在做客户端超时
 	CheckInterval *time.Duration //检测是否连接的间隔
 	HeartInterval *time.Duration //心跳间隔,负数默认不开启心跳检测
-	ChunksSize    *int           //发送文件时,文件大小
+	ChunksSize    *int           //发送文件时,每次分片文件大小
 	RetErr        error          //返回一个自定义的错误
 	Weight        *int           //权重 ,负数不参只保留一个链接,且绝对值越大，权重越大
 	//server

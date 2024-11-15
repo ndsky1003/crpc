@@ -9,6 +9,7 @@ import (
 // Marshal will encode request header into a byte slice
 type FileBody struct {
 	ChunksIndex uint16 // 65525个
+	IsFinish    uint16
 	Offset      uint64
 	Filename    string //存储路径
 	Data        []byte
@@ -22,6 +23,9 @@ func (r *FileBody) Marshal() []byte {
 	body := make([]byte, MaxFileBodySize+len(r.Filename)+len(r.Data))
 
 	binary.LittleEndian.PutUint16(body[idx:], r.ChunksIndex)
+	idx += comm.Uint16Size
+
+	binary.LittleEndian.PutUint16(body[idx:], r.IsFinish)
 	idx += comm.Uint16Size
 
 	idx += binary.PutUvarint(body[idx:], r.Offset)
@@ -46,6 +50,9 @@ func (r *FileBody) Unmarshal(data []byte) (err error) {
 	}()
 	idx, size := 0, 0
 	r.ChunksIndex = binary.LittleEndian.Uint16(data[idx:])
+	idx += comm.Uint16Size
+
+	r.IsFinish = binary.LittleEndian.Uint16(data[idx:])
 	idx += comm.Uint16Size
 
 	offset, size := binary.Uvarint(data[idx:])

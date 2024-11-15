@@ -30,8 +30,8 @@ func (t T) String() string {
 		return "MsgPack"
 	case FilePack:
 		return "FilePack"
-	case Protobuf:
-		return "Protobuf"
+	// case Protobuf:
+	// 	return "Protobuf"
 	case Msgp:
 		return "Msgp"
 	case MsgPackJSONTag:
@@ -48,8 +48,8 @@ var coders = map[T]Coder{
 	MsgPack:        new_msgpack(),
 	MsgPackJSONTag: new_msgpack_with_tag("json"),
 	FilePack:       new_file_pack(),
-	Protobuf:       new_protobuf_pack(),
-	Msgp:           new_msgp_coder(),
+	// Protobuf:       new_protobuf_pack(),
+	Msgp: new_msgp_coder(),
 	// Sonic:          new_sonic_coder(),
 }
 

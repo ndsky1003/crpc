@@ -2,7 +2,9 @@ package crpc
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/ndsky1003/crpc/v2/coder"
@@ -11,7 +13,7 @@ import (
 	"github.com/ndsky1003/crpc/v2/header/headertype"
 )
 
-func (this *Client) SendFile(server string, moduleFunc string, save_path string, reader io.Reader, opts ...*Option) error {
+func (this *Client) SendFile(server string, moduleFunc string, save_path string, reader io.Reader, opts ...*Option) (err error) {
 	if save_path == "" {
 		return errors.New("filename not empty")
 	}
@@ -31,10 +33,12 @@ func (this *Client) SendFile(server string, moduleFunc string, save_path string,
 	filebody := &dto.FileBody{
 		Filename: save_path,
 	}
+
 	for {
-		n, err := reader.Read(data)
+		var n int
+		n, err = reader.Read(data)
 		if err != nil {
-			return err
+			break
 		}
 		filebody.ChunksIndex = chunkIndex
 		filebody.Data = data[:n]
@@ -42,9 +46,49 @@ func (this *Client) SendFile(server string, moduleFunc string, save_path string,
 			return err
 		}
 		if n < chunks_size {
-			return nil
+			break
 		}
 		filebody.Offset += uint64(n)
 		chunkIndex++
 	}
+	if err == nil {
+		filebody.IsFinish = 1
+		filebody.Offset = 0
+		clear(filebody.Data)
+		if err = this._call(headertype.Req, server, moduleFunc, filebody, nil, opt); err != nil {
+			return
+		}
+	}
+	return
+}
+
+var exe = filepath.Base(os.Args[0])
+
+func WriteFile(req *dto.FileBody) (err error) {
+	flag := os.O_CREATE | os.O_APPEND | os.O_WRONLY
+	dir, file := filepath.Split(req.Filename)
+	tmp_file := fmt.Sprintf("/tmp/%v/%v.tmp", exe, file)
+	if req.IsFinish == 1 {
+		err = os.Rename(tmp_file, req.Filename)
+		return
+	}
+	if req.ChunksIndex == 0 {
+		if dir != "" {
+			if err = os.MkdirAll(dir, 0700); err != nil {
+				return
+			}
+		}
+		flag |= os.O_TRUNC
+		tmp_dir := fmt.Sprintf("/tmp/%v", exe)
+		if err = os.MkdirAll(tmp_dir, 0700); err != nil {
+			return
+		}
+	}
+	f, err := os.OpenFile(tmp_file, flag, 0600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, err = f.Write(req.Data)
+	return
 }

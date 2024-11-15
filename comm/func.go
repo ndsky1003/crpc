@@ -2,8 +2,6 @@ package comm
 
 import (
 	"encoding/binary"
-	"os"
-	"path/filepath"
 	"reflect"
 
 	"github.com/ndsky1003/crpc/v2/constant"
@@ -24,21 +22,6 @@ func BinaryWriteString(data []byte, str string) int {
 	copy(data[idx:], str)
 	idx += len(str)
 	return idx
-}
-
-func GetWriteFile(chunkIndex uint16, filename string) (f *os.File, err error) {
-	dir, _ := filepath.Split(filename)
-	if dir != "" {
-		if err = os.MkdirAll(dir, 0700); err != nil {
-			return
-		}
-	}
-	var flag = os.O_CREATE | os.O_APPEND | os.O_WRONLY
-	if chunkIndex == 0 {
-		flag |= os.O_TRUNC
-	}
-	f, err = os.OpenFile(filename, flag, 0600)
-	return
 }
 
 func IsStandardErr(err error) bool {

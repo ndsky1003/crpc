@@ -9,8 +9,8 @@ import (
 	"github.com/tinylib/msgp/msgp"
 )
 
-func TestMarshalUnmarshalPerson(t *testing.T) {
-	v := Person{}
+func TestMarshalUnmarshalPersonUseTest(t *testing.T) {
+	v := PersonUseTest{}
 	bts, err := v.MarshalMsg(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -32,8 +32,8 @@ func TestMarshalUnmarshalPerson(t *testing.T) {
 	}
 }
 
-func BenchmarkMarshalMsgPerson(b *testing.B) {
-	v := Person{}
+func BenchmarkMarshalMsgPersonUseTest(b *testing.B) {
+	v := PersonUseTest{}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -41,8 +41,8 @@ func BenchmarkMarshalMsgPerson(b *testing.B) {
 	}
 }
 
-func BenchmarkAppendMsgPerson(b *testing.B) {
-	v := Person{}
+func BenchmarkAppendMsgPersonUseTest(b *testing.B) {
+	v := PersonUseTest{}
 	bts := make([]byte, 0, v.Msgsize())
 	bts, _ = v.MarshalMsg(bts[0:0])
 	b.SetBytes(int64(len(bts)))
@@ -53,8 +53,8 @@ func BenchmarkAppendMsgPerson(b *testing.B) {
 	}
 }
 
-func BenchmarkUnmarshalPerson(b *testing.B) {
-	v := Person{}
+func BenchmarkUnmarshalPersonUseTest(b *testing.B) {
+	v := PersonUseTest{}
 	bts, _ := v.MarshalMsg(nil)
 	b.ReportAllocs()
 	b.SetBytes(int64(len(bts)))
@@ -67,21 +67,22 @@ func BenchmarkUnmarshalPerson(b *testing.B) {
 	}
 }
 
-func TestEncodeDecodePerson(t *testing.T) {
-	v := Person{}
+func TestEncodeDecodePersonUseTest(t *testing.T) {
+	v := PersonUseTest{}
 	var buf bytes.Buffer
-	msgp.Encode(&buf, &v)
+	msgp.Encode(&buf, nil)
 
 	m := v.Msgsize()
 	if buf.Len() > m {
-		t.Log("WARNING: TestEncodeDecodePerson Msgsize() is inaccurate")
+		t.Log("WARNING: TestEncodeDecodePersonUseTest Msgsize() is inaccurate")
 	}
 
-	vn := Person{}
+	vn := PersonUseTest{}
 	err := msgp.Decode(&buf, &vn)
 	if err != nil {
 		t.Error(err)
 	}
+	t.Logf("%+v", vn)
 
 	buf.Reset()
 	msgp.Encode(&buf, &v)
@@ -91,8 +92,8 @@ func TestEncodeDecodePerson(t *testing.T) {
 	}
 }
 
-func BenchmarkEncodePerson(b *testing.B) {
-	v := Person{}
+func BenchmarkEncodePersonUseTest(b *testing.B) {
+	v := PersonUseTest{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 	b.SetBytes(int64(buf.Len()))
@@ -105,8 +106,8 @@ func BenchmarkEncodePerson(b *testing.B) {
 	en.Flush()
 }
 
-func BenchmarkDecodePerson(b *testing.B) {
-	v := Person{}
+func BenchmarkDecodePersonUseTest(b *testing.B) {
+	v := PersonUseTest{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 	b.SetBytes(int64(buf.Len()))
