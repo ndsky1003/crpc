@@ -63,11 +63,16 @@ func (this *Client) SendFile(server string, moduleFunc string, save_path string,
 }
 
 var exe = filepath.Base(os.Args[0])
+var tmp_dir = ".tmp"
+
+func init() {
+	os.Mkdir(".tmp", 0700)
+}
 
 func WriteFile(req *dto.FileBody) (err error) {
 	flag := os.O_CREATE | os.O_APPEND | os.O_WRONLY
 	dir, file := filepath.Split(req.Filename)
-	tmp_file := fmt.Sprintf("/tmp/%v/%v.tmp", exe, file)
+	tmp_file := fmt.Sprintf("%s/%v/%v.tmp", tmp_dir, exe, file)
 	if req.IsFinish == 1 {
 		err = os.Rename(tmp_file, req.Filename)
 		return
@@ -79,7 +84,7 @@ func WriteFile(req *dto.FileBody) (err error) {
 			}
 		}
 		flag |= os.O_TRUNC
-		tmp_dir := fmt.Sprintf("/tmp/%v", exe)
+		tmp_dir := fmt.Sprintf("%s/%v", tmp_dir, exe)
 		if err = os.MkdirAll(tmp_dir, 0700); err != nil {
 			return
 		}

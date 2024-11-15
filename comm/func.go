@@ -5,6 +5,7 @@ import (
 	"reflect"
 
 	"github.com/ndsky1003/crpc/v2/constant"
+	"github.com/samber/lo"
 )
 
 func BinaryReadString(data []byte) (string, int) {
@@ -26,5 +27,5 @@ func BinaryWriteString(data []byte, str string) int {
 
 func IsStandardErr(err error) bool {
 	et := reflect.TypeOf(err)
-	return et == constant.StandardError1 || et == constant.StandardError2
+	return lo.Contains(constant.StandardErrors, et)
 }

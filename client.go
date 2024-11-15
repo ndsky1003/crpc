@@ -395,6 +395,7 @@ func (this *Client) input(codec codec.Codec) {
 						}
 					}
 					logrus.Error(err)
+					debug.PrintStack()
 				}
 			}()
 			if err := this.handle_msg(h, metaData, bodyData); err != nil {
@@ -459,7 +460,7 @@ func (this *Client) handle_msg(h *header.Header, metaData, bodyData []byte) (err
 						call.Err = call.opt.RetErr
 					}
 				} else {
-					call.Err = ErrCusstomNoReceiveType
+					call.Err = fmt.Errorf("%s,%w", string(bodyData), ErrCusstomNoReceiveType)
 				}
 				call.done()
 			default:
@@ -541,6 +542,7 @@ func (this *Client) _go(ht headertype.T, server string, moduleFunc string, req, 
 	call.Done = done
 	call.Req = req
 	call.Ret = ret
+	call.opt = opt
 	if server == "" {
 		call.Err = fmt.Errorf("server is emtpty")
 		call.done()
@@ -611,7 +613,6 @@ func (this *Client) sendCall(ht headertype.T, call *Call, opt *Option) {
 	this.l.Unlock()
 	h := header.Get()
 	defer h.Release()
-	// h.InitData(this.version, ht, *opt.CoderType, *opt.CompressType, this.name, call.Service, call.Module, call.Method, seq)
 	h.SetVersion(this.version).
 		SetType(ht).
 		SetMetaCoderT(*opt.MetaCoderT).
