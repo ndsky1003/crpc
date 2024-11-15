@@ -7,7 +7,7 @@ type Call struct {
 	Req     any
 	Ret     any
 	Err     error
-	opt     *option
+	opt     *Option
 	Done    chan *Call
 }
 

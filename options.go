@@ -7,7 +7,7 @@ import (
 	"github.com/ndsky1003/crpc/v2/compressor"
 )
 
-type option struct {
+type Option struct {
 	Meta any //放在header中的透传信息
 	//client
 	MetaCoderT    *coder.T       //meta数据的编解码器
@@ -24,11 +24,11 @@ type option struct {
 	Secret *string
 }
 
-func Option() *option {
-	return new(option)
+func Options() *Option {
+	return new(Option)
 }
 
-func (this *option) SetMetaData(meta any) *option {
+func (this *Option) SetMetaData(meta any) *Option {
 	if this == nil {
 		return this
 	}
@@ -36,7 +36,7 @@ func (this *option) SetMetaData(meta any) *option {
 	return this
 }
 
-func (this *option) RegistRetErr(r error) *option {
+func (this *Option) RegistRetErr(r error) *Option {
 	if this == nil {
 		return this
 	}
@@ -44,7 +44,7 @@ func (this *option) RegistRetErr(r error) *option {
 	return this
 }
 
-func (this *option) SetSecret(s string) *option {
+func (this *Option) SetSecret(s string) *Option {
 	if this == nil {
 		return this
 	}
@@ -52,7 +52,7 @@ func (this *option) SetSecret(s string) *option {
 	return this
 }
 
-func (this *option) SetCoderT(t coder.T) *option {
+func (this *Option) SetCoderT(t coder.T) *Option {
 	if this == nil {
 		return this
 	}
@@ -62,7 +62,7 @@ func (this *option) SetCoderT(t coder.T) *option {
 	return this
 }
 
-func (this *option) SetMetaCoderT(t coder.T) *option {
+func (this *Option) SetMetaCoderT(t coder.T) *Option {
 	if this == nil {
 		return this
 	}
@@ -70,7 +70,7 @@ func (this *option) SetMetaCoderT(t coder.T) *option {
 	return this
 }
 
-func (this *option) SetReqCoderT(t coder.T) *option {
+func (this *Option) SetReqCoderT(t coder.T) *Option {
 	if this == nil {
 		return this
 	}
@@ -78,7 +78,7 @@ func (this *option) SetReqCoderT(t coder.T) *option {
 	return this
 }
 
-func (this *option) SetResCoderT(t coder.T) *option {
+func (this *Option) SetResCoderT(t coder.T) *Option {
 	if this == nil {
 		return this
 	}
@@ -86,7 +86,7 @@ func (this *option) SetResCoderT(t coder.T) *option {
 	return this
 }
 
-func (this *option) SetCompressT(t compressor.T) *option {
+func (this *Option) SetCompressT(t compressor.T) *Option {
 	if this == nil {
 		return this
 	}
@@ -94,7 +94,7 @@ func (this *option) SetCompressT(t compressor.T) *option {
 	return this
 }
 
-func (this *option) SetTimeout(t time.Duration) *option {
+func (this *Option) SetTimeout(t time.Duration) *Option {
 	if this == nil {
 		return this
 	}
@@ -102,7 +102,7 @@ func (this *option) SetTimeout(t time.Duration) *option {
 	return this
 }
 
-func (this *option) SetCheckInterval(t time.Duration) *option {
+func (this *Option) SetCheckInterval(t time.Duration) *Option {
 	if this == nil {
 		return this
 	}
@@ -110,7 +110,7 @@ func (this *option) SetCheckInterval(t time.Duration) *option {
 	return this
 }
 
-func (this *option) SetChunksMaxSize(t int) *option {
+func (this *Option) SetChunksMaxSize(t int) *Option {
 	if this == nil {
 		return this
 	}
@@ -118,7 +118,7 @@ func (this *option) SetChunksMaxSize(t int) *option {
 	return this
 }
 
-func (this *option) SetWeight(t int) *option {
+func (this *Option) SetWeight(t int) *Option {
 	if this == nil {
 		return this
 	}
@@ -127,7 +127,7 @@ func (this *option) SetWeight(t int) *option {
 }
 
 // < 0 将没有心跳
-func (this *option) SetHeartInterval(t time.Duration) *option {
+func (this *Option) SetHeartInterval(t time.Duration) *Option {
 	if this == nil {
 		return this
 	}
@@ -135,14 +135,14 @@ func (this *option) SetHeartInterval(t time.Duration) *option {
 	return this
 }
 
-func (this *option) Merge(opts ...*option) *option {
+func (this *Option) Merge(opts ...*Option) *Option {
 	for _, opt := range opts {
 		this.merge(opt)
 	}
 	return this
 }
 
-func (this *option) merge(opt *option) {
+func (this *Option) merge(opt *Option) {
 	if opt.Meta != nil {
 		this.Meta = opt.Meta
 	}

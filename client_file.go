@@ -11,7 +11,7 @@ import (
 	"github.com/ndsky1003/crpc/v2/header/headertype"
 )
 
-func (this *Client) SendFile(server string, moduleFunc string, save_path string, reader io.Reader, opts ...*option) error {
+func (this *Client) SendFile(server string, moduleFunc string, save_path string, reader io.Reader, opts ...*Option) error {
 	if save_path == "" {
 		return errors.New("filename not empty")
 	}
@@ -20,7 +20,7 @@ func (this *Client) SendFile(server string, moduleFunc string, save_path string,
 		return errors.New("filename must relative path")
 	}
 
-	opt := Option().Merge(this.opt).Merge(opts...).
+	opt := Options().Merge(this.opt).Merge(opts...).
 		SetReqCoderT(coder.FilePack).
 		SetCompressT(compressor.Raw).
 		SetTimeout(60 * 60 * 2)

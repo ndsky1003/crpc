@@ -38,11 +38,11 @@ type Client struct {
 	codec        codec.Codec
 	seq          uint64
 	pending      map[uint64]*Call
-	opt          *option
+	opt          *Option
 	connecting   bool // client is connecting
 }
 
-func Dial(name, url string, opts ...*option) *Client {
+func Dial(name, url string, opts ...*Option) *Client {
 	c := &Client{
 		version: uint32(time.Now().Unix()),
 		name:    name,
@@ -55,7 +55,7 @@ func Dial(name, url string, opts ...*option) *Client {
 	if url == "" {
 		panic("crpc Dail url is empty")
 	}
-	c.opt = Option().
+	c.opt = Options().
 		SetWeight(10).
 		SetMetaCoderT(coder.JSON).
 		SetReqCoderT(coder.JSON).
@@ -215,7 +215,7 @@ func (this *Client) StopHeart() {
 }
 
 // 内部调用
-func (this *Client) func_call_local(moduleStr, method string, req any, ret any, opt *option) (err error) {
+func (this *Client) func_call_local(moduleStr, method string, req any, ret any, opt *Option) (err error) {
 	if v, ok := this.moduleMap.Load(moduleStr); !ok {
 		err = fmt.Errorf("%w,module:%s is not exist", FuncError, moduleStr)
 		return
@@ -493,8 +493,8 @@ func (this *Client) parseMoudleFunc(moduleFunc string) (module, function string,
 }
 
 // 对外的方法 sync
-func (this *Client) Call(server string, moduleFunc string, req, ret any, opts ...*option) error {
-	opt := Option().Merge(this.opt).Merge(opts...)
+func (this *Client) Call(server string, moduleFunc string, req, ret any, opts ...*Option) error {
+	opt := Options().Merge(this.opt).Merge(opts...)
 	if server == this.name {
 		module, method, err := this.parseMoudleFunc(moduleFunc)
 		if err != nil {
@@ -505,7 +505,7 @@ func (this *Client) Call(server string, moduleFunc string, req, ret any, opts ..
 	return this._call(headertype.Req, server, moduleFunc, req, ret, opt)
 }
 
-func (this *Client) _call(ht headertype.T, server string, moduleFunc string, req, ret any, opt *option) error {
+func (this *Client) _call(ht headertype.T, server string, moduleFunc string, req, ret any, opt *Option) error {
 	timeout := *opt.Timeout
 	if timeout > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
@@ -524,12 +524,12 @@ func (this *Client) _call(ht headertype.T, server string, moduleFunc string, req
 }
 
 // async
-func (this *Client) Go(server string, moduleFunc string, req, ret any, opts ...*option) *Call {
-	opt := Option().Merge(this.opt).Merge(opts...)
+func (this *Client) Go(server string, moduleFunc string, req, ret any, opts ...*Option) *Call {
+	opt := Options().Merge(this.opt).Merge(opts...)
 	return this._go(headertype.Req, server, moduleFunc, req, ret, make(chan *Call, 1), opt)
 }
 
-func (this *Client) _go(ht headertype.T, server string, moduleFunc string, req, ret any, done chan *Call, opt *option) *Call {
+func (this *Client) _go(ht headertype.T, server string, moduleFunc string, req, ret any, done chan *Call, opt *Option) *Call {
 	call := &Call{}
 	if done == nil {
 		done = make(chan *Call, 10) // buffered.
@@ -557,7 +557,7 @@ func (this *Client) _go(ht headertype.T, server string, moduleFunc string, req, 
 }
 
 // send msg 就是类似于MQ
-func (this *Client) Send(server, moduleFunc string, v any, opts ...*option) error {
+func (this *Client) Send(server, moduleFunc string, v any, opts ...*Option) error {
 	if server == "" {
 		return errors.New("server is empty")
 	}
@@ -571,7 +571,7 @@ func (this *Client) Send(server, moduleFunc string, v any, opts ...*option) erro
 	if method == "" {
 		return errors.New("method is empty")
 	}
-	opt := Option().Merge(this.opt).Merge(opts...)
+	opt := Options().Merge(this.opt).Merge(opts...)
 	h := header.Get()
 	h.SetVersion(this.version).
 		SetType(headertype.Msg).
@@ -601,7 +601,7 @@ func (this *Client) send(h *header.Header, meta, body any) (err error) {
 	return this.codec.WriteFrame(h, meta, body)
 }
 
-func (this *Client) sendCall(ht headertype.T, call *Call, opt *option) {
+func (this *Client) sendCall(ht headertype.T, call *Call, opt *Option) {
 	if call == nil {
 		return
 	}

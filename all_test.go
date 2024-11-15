@@ -67,7 +67,7 @@ func SetList(req struct {
 func TestMain(m *testing.M) {
 	go NewServer().Listen(":8081")
 	go func() {
-		client := Dial("client", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.JSON))
+		client := Dial("client", "127.0.0.1:8081", Options().SetHeartInterval(-1).SetCoderT(coder.JSON))
 		client.RegisterName("rpc", new(robot_service))
 		if err := client.RegisterFunc("GetList", func(meta, req int) (*TestOBJ, error) {
 			fmt.Printf("GetList=============req:%v,meta:%v\n", req, meta)
@@ -87,7 +87,7 @@ func TestMain(m *testing.M) {
 }
 
 func Test_Call(t *testing.T) {
-	client1 := Dial("client1", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.Msgp).SetCompressT(compressor.Raw))
+	client1 := Dial("client1", "127.0.0.1:8081", Options().SetHeartInterval(-1).SetCoderT(coder.Msgp).SetCompressT(compressor.Raw))
 	time.Sleep(1e9)
 	type args struct {
 		name   string
@@ -155,7 +155,7 @@ func Test_Call(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var ret TestOBJ
 			var meta = TestOBJ{Name: "Meta", Age: 18}
-			if err := client1.Call(tt.server, tt.method, tt.a, &ret, Option().SetCoderT(coder.JSON).SetMetaData(meta)); err != nil {
+			if err := client1.Call(tt.server, tt.method, tt.a, &ret, Options().SetCoderT(coder.JSON).SetMetaData(meta)); err != nil {
 				t.Error("dddd:", err)
 			} else if tt.r != ret {
 				t.Errorf("return value:%+v,expect value:%v", ret, tt.r)
@@ -165,7 +165,7 @@ func Test_Call(t *testing.T) {
 }
 
 func Benchmark_Call(b *testing.B) {
-	client2 := Dial("client2", "127.0.0.1:8081", Option().SetHeartInterval(-1).SetCoderT(coder.JSON).SetCompressT(compressor.Raw))
+	client2 := Dial("client2", "127.0.0.1:8081", Options().SetHeartInterval(-1).SetCoderT(coder.JSON).SetCompressT(compressor.Raw))
 	time.Sleep(1e9)
 	type args struct {
 		name   string
