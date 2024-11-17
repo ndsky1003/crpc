@@ -80,6 +80,7 @@ func (this *Client) getConnecting() bool {
 }
 
 func (this *Client) keepAlive() {
+	heat_interval := *this.opt.HeartInterval
 	for {
 		if !this.getConnecting() {
 			conn, err := net.Dial("tcp", this.url)
@@ -101,7 +102,6 @@ func (this *Client) keepAlive() {
 				continue
 			}
 		} else { //heart
-			heat_interval := *this.opt.HeartInterval
 			if heat_interval > 0 {
 				func() {
 					h := header.Get()

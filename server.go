@@ -30,16 +30,15 @@ func NewServer(opts ...*option_server) *server {
 	return c
 }
 
-// addrs ["192.168.0.1","192.168.0.2"]
-// port 8080
-func (this *server) Listens(addrs []string, port int) {
+// addrs ["192.168.0.1:8080","192.168.0.2:8080"]
+func (this *server) Listens(addrs []string) {
 	for i := len(addrs) - 1; i >= 0; i-- {
 		addr := addrs[i]
-		listenAddr := fmt.Sprintf("%v:%v", addr, port)
+		// listenAddr := fmt.Sprintf("%v:%v", addr, port)
 		if i != 0 {
-			go this.listen(listenAddr)
+			go this.listen(addr)
 		} else {
-			this.listen(listenAddr)
+			this.listen(addr)
 		}
 	}
 }
