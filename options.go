@@ -143,6 +143,9 @@ func (this *Option) Merge(opts ...*Option) *Option {
 }
 
 func (this *Option) merge(opt *Option) {
+	if opt == nil {
+		return
+	}
 	if opt.Meta != nil {
 		this.Meta = opt.Meta
 	}
@@ -216,6 +219,9 @@ func (this *option_server) Merge(opts ...*option_server) *option_server {
 }
 
 func (this *option_server) merge(opt *option_server) {
+	if opt == nil {
+		return
+	}
 	if opt.Secret != nil {
 		this.Secret = opt.Secret
 	}
