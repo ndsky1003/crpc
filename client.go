@@ -286,7 +286,9 @@ func (this *Client) func_call_local(moduleStr, method string, req any, ret any, 
 							if real_ret.Type().Kind() == reflect.Pointer {
 								real_ret = real_ret.Elem()
 							}
-							retv.Set(real_ret)
+							if real_ret.IsValid() {
+								retv.Set(real_ret)
+							}
 						}
 					}
 				}
@@ -354,12 +356,27 @@ func (this *Client) func_call(h *header.Header, metaData, bodyData []byte) (ret 
 			} else {
 				if len(returnValues) == 2 {
 					retValue := returnValues[0]
-					ret = retValue.Interface()
+					// ret = retValue.Interface()
+					ret = unwrap_dynamic_type_not_nil(retValue)
 				}
 			}
 			return
 		}
 	}
+}
+
+func unwrap_dynamic_type_not_nil(v reflect.Value) any {
+	if rt := v.Type().Kind(); rt == reflect.Chan ||
+		rt == reflect.Func ||
+		rt == reflect.Interface ||
+		rt == reflect.Map ||
+		rt == reflect.Pointer ||
+		rt == reflect.Slice {
+		if v.IsNil() {
+			return nil
+		}
+	}
+	return v.Interface()
 }
 
 func (this *Client) input(codec codec.Codec) {
