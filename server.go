@@ -3,7 +3,6 @@ package crpc
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 
@@ -23,8 +22,8 @@ func NewServer(opts ...*option_server) *server {
 	c := &server{
 		services: map[string]*service_mgr{},
 	}
-	c.opt = OptionServer().Merge(opts...)
-	c.codecGenFunc = func(conn io.ReadWriteCloser) (codec.Codec, error) {
+	c.opt = OptionServer().SetReadDeadline(35).SetWriteDeadline(15).Merge(opts...)
+	c.codecGenFunc = func(conn net.Conn) (codec.Codec, error) {
 		return codec.NewCodec(conn), nil
 	}
 	return c
@@ -67,7 +66,7 @@ func (this *server) listen(url string) {
 			logrus.Error(err)
 			continue
 		}
-		service := newService(this, codec)
+		service := newService(this, codec, this.opt)
 		go service.serve()
 	}
 }

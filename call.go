@@ -1,5 +1,7 @@
 package crpc
 
+import "github.com/ndsky1003/crpc/v2/header"
+
 type Call struct {
 	Service string
 	Module  string
@@ -16,4 +18,10 @@ func (this *Call) done() {
 	case this.Done <- this:
 	default:
 	}
+}
+
+type send_msg struct {
+	h    *header.Header
+	meta any
+	body any
 }

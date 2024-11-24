@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"net"
+	"time"
 
 	"github.com/ndsky1003/crpc/v2/coder"
 	"github.com/ndsky1003/crpc/v2/compressor"
@@ -24,18 +26,20 @@ type Codec interface {
 	ReadMetaRawData(*header.Header) ([]byte, error)
 	ReadBodyData(*header.Header) ([]byte, error)
 	ReadBodyRawData(*header.Header) ([]byte, error)
-	// Read([]byte) error
 
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
 	Close() error
 }
 
 type codec struct {
 	r    io.Reader
 	w    io.Writer
-	conn io.ReadWriteCloser
+	conn net.Conn
 }
 
-func NewCodec(conn io.ReadWriteCloser) Codec {
+func NewCodec(conn net.Conn) Codec {
 	if conn == nil {
 		panic("crpc conn is nil")
 	}
@@ -203,4 +207,16 @@ func (this *codec) read(data []byte) (err error) {
 
 func (this *codec) Close() error {
 	return this.conn.Close()
+}
+
+func (this *codec) SetDeadline(t time.Time) error {
+	return this.conn.SetDeadline(t)
+}
+
+func (this *codec) SetReadDeadline(t time.Time) error {
+	return this.conn.SetReadDeadline(t)
+}
+
+func (this *codec) SetWriteDeadline(t time.Time) error {
+	return this.conn.SetWriteDeadline(t)
 }

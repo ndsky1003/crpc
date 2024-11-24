@@ -20,6 +20,9 @@ type Option struct {
 	ChunksSize    *int           //发送文件时,每次分片文件大小
 	RetErr        error          //返回一个自定义的错误
 	Weight        *int           //权重 ,负数不参只保留一个链接,且绝对值越大，权重越大
+	ReadDeadline  *time.Duration
+	WriteDeadline *time.Duration
+	MaxCacheSize  *int //sendchan 的容量
 	//server
 	Secret *string
 }
@@ -131,7 +134,34 @@ func (this *Option) SetHeartInterval(t time.Duration) *Option {
 	if this == nil {
 		return this
 	}
+	if t < 0 {
+		return this
+	}
 	this.HeartInterval = &t
+	return this
+}
+
+func (this *Option) SetReadDeadline(t time.Duration) *Option {
+	if this == nil {
+		return this
+	}
+	this.ReadDeadline = &t
+	return this
+}
+
+func (this *Option) SetWriteDeadline(t time.Duration) *Option {
+	if this == nil {
+		return this
+	}
+	this.WriteDeadline = &t
+	return this
+}
+
+func (this *Option) SetMaxCacheSize(t int) *Option {
+	if this == nil {
+		return this
+	}
+	this.MaxCacheSize = &t
 	return this
 }
 
@@ -193,10 +223,24 @@ func (this *Option) merge(opt *Option) {
 	if opt.Secret != nil {
 		this.Secret = opt.Secret
 	}
+
+	if opt.ReadDeadline != nil {
+		this.ReadDeadline = opt.ReadDeadline
+	}
+
+	if opt.WriteDeadline != nil {
+		this.WriteDeadline = opt.WriteDeadline
+	}
+
+	if opt.MaxCacheSize != nil {
+		this.MaxCacheSize = opt.MaxCacheSize
+	}
 }
 
 type option_server struct {
-	Secret *string
+	Secret        *string
+	ReadDeadline  *time.Duration
+	WriteDeadline *time.Duration
 }
 
 func OptionServer() *option_server {
@@ -211,6 +255,22 @@ func (this *option_server) SetSecret(s string) *option_server {
 	return this
 }
 
+func (this *option_server) SetReadDeadline(t time.Duration) *option_server {
+	if this == nil {
+		return this
+	}
+	this.ReadDeadline = &t
+	return this
+}
+
+func (this *option_server) SetWriteDeadline(t time.Duration) *option_server {
+	if this == nil {
+		return this
+	}
+	this.WriteDeadline = &t
+	return this
+}
+
 func (this *option_server) Merge(opts ...*option_server) *option_server {
 	for _, opt := range opts {
 		this.merge(opt)
@@ -222,7 +282,16 @@ func (this *option_server) merge(opt *option_server) {
 	if opt == nil {
 		return
 	}
+
 	if opt.Secret != nil {
 		this.Secret = opt.Secret
+	}
+
+	if opt.ReadDeadline != nil {
+		this.ReadDeadline = opt.ReadDeadline
+	}
+
+	if opt.WriteDeadline != nil {
+		this.WriteDeadline = opt.WriteDeadline
 	}
 }

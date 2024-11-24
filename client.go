@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"reflect"
 	"runtime/debug"
@@ -22,7 +21,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type codecFunc func(conn io.ReadWriteCloser) (codec.Codec, error)
+type codecFunc func(conn net.Conn) (codec.Codec, error)
 
 const defaultChunksSize = 1 * 1024 * 1024 //1M 不涉及上传文件，大多都是图片，所以限制1M合理，具体项目自定义
 
@@ -39,7 +38,12 @@ type Client struct {
 	seq          uint64
 	pending      map[uint64]*Call
 	opt          *Option
-	connecting   bool // client is connecting
+	isStop       bool
+	//NOTE: 有2个地方可以stop,如果readStop了,并且把链接建立好了在stop,就会把心链接kill掉
+	//下面这个参数是修复上面这个问题的
+	stop_version uint32
+	done         chan struct{}
+	sendChan     chan *send_msg
 }
 
 func Dial(name, url string, opts ...*Option) *Client {
@@ -63,67 +67,41 @@ func Dial(name, url string, opts ...*Option) *Client {
 		SetCompressT(compressor.Raw).
 		SetTimeout(10).
 		SetCheckInterval(1).
-		SetHeartInterval(10).
+		SetHeartInterval(5).
+		SetReadDeadline(10).
+		SetWriteDeadline(10).
+		SetMaxCacheSize(1024).
 		SetChunksMaxSize(defaultChunksSize).Merge(opts...)
 
+	c.sendChan = make(chan *send_msg, *c.opt.MaxCacheSize)
 	//合并属性
-	c.codecGenFunc = func(conn io.ReadWriteCloser) (codec.Codec, error) {
+	c.codecGenFunc = func(conn net.Conn) (codec.Codec, error) {
 		return codec.NewCodec(conn), nil
 	}
 	go c.keepAlive()
 	return c
 }
-func (this *Client) getConnecting() bool {
-	this.l.Lock()
-	defer this.l.Unlock()
-	return this.connecting
-}
 
 func (this *Client) keepAlive() {
-	heat_interval := *this.opt.HeartInterval
 	for {
-		if !this.getConnecting() {
-			conn, err := net.Dial("tcp", this.url)
-			if err != nil {
-				logrus.Errorf("dail err:%v\n", err)
-				time.Sleep(*this.opt.CheckInterval * time.Second)
-				continue
-			}
-			codec, err := this.codecGenFunc(conn)
-			if err != nil {
-				logrus.Errorf("codec err:%v\n", err)
-				time.Sleep(*this.opt.CheckInterval * time.Second)
-				continue
-			} else {
-				if err := this.serve(codec); err != nil {
-					logrus.Error("server:", err)
-				}
-				time.Sleep(*this.opt.CheckInterval * time.Second) //防止连上就断开，再继续连接
-				continue
-			}
-		} else { //heart
-			if heat_interval > 0 {
-				func() {
-					h := header.Get()
-					defer h.Release()
-					h.SetVersion(this.version).
-						SetType(headertype.Ping).
-						SetMetaCoderT(coder.JSON).
-						SetReqCoderT(coder.JSON).
-						SetResCoderT(coder.JSON).
-						SetCompressT(compressor.Raw)
-					if err := this.send(h, nil, nil); err != nil {
-						logrus.Error(err)
-						if errors.Is(err, io.ErrShortWrite) || errors.Is(err, WriteError) || errors.Is(err, codec.WriteError) {
-							this.stop(err)
-						}
-					}
-				}()
-				time.Sleep(heat_interval * time.Second)
-			} else {
-				time.Sleep(*this.opt.CheckInterval * time.Second) //下次去尝试连接
-			}
+		conn, err := net.Dial("tcp", this.url)
+		if err != nil {
+			logrus.Errorf("dail err:%v\n", err)
+			time.Sleep(*this.opt.CheckInterval * time.Second)
+			continue
 		}
+
+		codec, err := this.codecGenFunc(conn)
+		if err != nil {
+			logrus.Errorf("codec err:%v\n", err)
+			time.Sleep(*this.opt.CheckInterval * time.Second)
+			continue
+		}
+
+		if err := this.serve(codec); err != nil {
+			logrus.Error("server:", err)
+		}
+		time.Sleep(*this.opt.CheckInterval * time.Second) //防止连上就断开，再继续连接
 	}
 }
 
@@ -185,33 +163,94 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 		err = fmt.Errorf("%w,verify failed", VerifyError)
 		return
 	}
-	this.connecting = true
+	this.isStop = false
+	stop_version := uint32(time.Now().Unix())
+	this.stop_version = stop_version
 	this.codec = codec
+	this.done = make(chan struct{})
 	this.l.Unlock()
-	go this.input(codec)
+	logrus.Infof("client %s with connecting", this.name)
+	this._serve(codec, stop_version)
 	return
 }
 
-func (this *Client) stop(err error) {
+func (this *Client) _serve(codec codec.Codec, stop_version uint32) {
+	go this.writePump(codec, stop_version)
+	this.readPump(codec, stop_version)
+}
+
+func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
+	ticker := time.NewTicker(*this.opt.HeartInterval * time.Second)
+	sendChan := this.sendChan
+	var err error
+	defer func() {
+		ticker.Stop()
+		this.stop(err, stop_version)
+	}()
+
+	isSkip_heart := false
+	writedeadline := *this.opt.WriteDeadline
+	for {
+		select {
+		case <-this.done:
+			return
+		case msg, ok := <-sendChan:
+			if !ok {
+				return
+			}
+			codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
+			if err = codec.WriteFrame(msg.h, msg.meta, msg.body); err != nil {
+				return
+			}
+			isSkip_heart = true
+			msg.h.Release()
+		case <-ticker.C:
+			if isSkip_heart {
+				isSkip_heart = false
+				continue
+			}
+			h := header.Get()
+			defer h.Release()
+			h.SetVersion(this.version).
+				SetType(headertype.Ping).
+				SetMetaCoderT(coder.JSON).
+				SetReqCoderT(coder.JSON).
+				SetResCoderT(coder.JSON).
+				SetCompressT(compressor.Raw)
+			codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
+			if err = codec.WriteFrame(h, nil, nil); err != nil {
+				err = fmt.Errorf("%w,ping", err)
+				return
+			}
+		}
+	}
+}
+
+func (this *Client) stop(err error, stop_version uint32) {
 	this.l.Lock()
 	defer this.l.Unlock()
+	if this.isStop {
+		return
+	}
+	if this.stop_version != stop_version {
+		return
+	}
+	logrus.Infof("Stopping client %s with error: %v", this.name, err)
+	close(this.done)
+	//sendChan 不清理,下次连起接着发
 	for _, call := range this.pending {
 		call.Err = err
 		call.done()
 	}
-	if this.connecting && this.codec != nil {
+	if this.codec != nil {
 		this.codec.Close()
 		this.codec = nil
 	}
 	this.seq = 0
 	this.pending = make(map[uint64]*Call)
-	this.connecting = false
-}
+	this.isStop = true
 
-func (this *Client) StopHeart() {
-	this.l.Lock()
-	defer this.l.Unlock()
-	this.opt.SetHeartInterval(-1)
+	logrus.Infof("Client %s stopped", this.name)
 }
 
 // 内部调用
@@ -379,30 +418,40 @@ func unwrap_dynamic_type_not_nil(v reflect.Value) any {
 	return v.Interface()
 }
 
-func (this *Client) input(codec codec.Codec) {
-	var err error
+func (this *Client) readPump(codec codec.Codec, stop_version uint32) (err error) {
+	defer func() {
+		this.stop(err, stop_version)
+	}()
 	var h *header.Header
 	for err == nil {
+		readdeadline := *this.opt.ReadDeadline
+		codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
 		if h, err = codec.ReadHeader(); err != nil {
-			err = fmt.Errorf("%w,%v", ReadError, err)
+			err = fmt.Errorf("1%w,%v", ReadError, err)
 			break
 		}
 
 		var metaData, bodyData []byte
-		if /*h.Type&headertype.Res == 0 &&*/ h.Type.IsReq() {
+		if h.Type.IsReq() {
+			codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
 			if metaData, err = codec.ReadMetaData(h); err != nil {
-				err = fmt.Errorf("%w,%v", ServerError, err)
+				err = fmt.Errorf("2%w,%v", ServerError, err)
 				break
 			}
 		}
 
+		codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
 		if bodyData, err = codec.ReadBodyData(h); err != nil {
-			err = fmt.Errorf("%w,%v", ServerError, err)
+			err = fmt.Errorf("3%w,%v", ServerError, err)
 			break
 		}
 
+		if h.Type == headertype.Pong {
+			h.Release()
+			continue
+		}
+
 		go func(h *header.Header, metaData, bodyData []byte) {
-			defer h.Release()
 			defer func() {
 				if err := recover(); err != nil {
 					if h.Type == headertype.Req || h.Type == headertype.Chunks {
@@ -426,9 +475,9 @@ func (this *Client) input(codec codec.Codec) {
 			logrus.Error(err)
 		}
 	}
-	time.Sleep(1e5) //上一个消息尚未处理完,下一个消息就报错退出了,call有概率会拿到第二个的错误消息,应为第二个处理的更快,这里加一个临界值
+	// time.Sleep(1e5) //上一个消息尚未处理完,下一个消息就报错退出了,call有概率会拿到第二个的错误消息,因为第二个处理的更快,这里加一个临界值
 	logrus.Errorf("%v read err:%+v\n", this.name, err)
-	this.stop(err)
+	return
 }
 
 func (this *Client) handle_msg(h *header.Header, metaData, bodyData []byte) (err error) {
@@ -455,6 +504,7 @@ func (this *Client) handle_msg(h *header.Header, metaData, bodyData []byte) (err
 			logrus.Error(e)
 		}
 	case headertype.Res_Success, headertype.Res_Err_Standard, headertype.Res_Err_Custom: //响应
+		defer h.Release()
 		seq := h.Seq
 		var call *Call
 		if this.version == h.Version {
@@ -488,7 +538,6 @@ func (this *Client) handle_msg(h *header.Header, metaData, bodyData []byte) (err
 				call.done()
 			}
 		}
-	case headertype.Pong:
 	default:
 		err = fmt.Errorf("headerType:%v,can not handle,please call author", h.Type)
 	}
@@ -602,22 +651,19 @@ func (this *Client) Send(server, moduleFunc string, v any, opts ...*Option) erro
 		SetToService(server).
 		SetModule(module).
 		SetMethod(method)
-	defer h.Release()
 	return this.send(h, opt.Meta, v)
 }
 
 func (this *Client) send(h *header.Header, meta, body any) (err error) {
-	this.l.Lock()
-	defer this.l.Unlock()
-	if !this.connecting {
-		err = fmt.Errorf("%w ,client is connecting:%v", WriteError, this.connecting)
+	msg := &send_msg{h, meta, body}
+	select {
+	case this.sendChan <- msg:
+		return nil
+	default:
+		h.Release()
+		err = fmt.Errorf("消息拥堵,请稍后重试%w", WriteError)
 		return
 	}
-	if this.codec == nil {
-		err = fmt.Errorf("%w,codec is nil", WriteError)
-		return
-	}
-	return this.codec.WriteFrame(h, meta, body)
 }
 
 func (this *Client) sendCall(ht headertype.T, call *Call, opt *Option) {
@@ -629,7 +675,6 @@ func (this *Client) sendCall(ht headertype.T, call *Call, opt *Option) {
 	this.pending[seq] = call
 	this.l.Unlock()
 	h := header.Get()
-	defer h.Release()
 	h.SetVersion(this.version).
 		SetType(ht).
 		SetMetaCoderT(*opt.MetaCoderT).

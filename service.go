@@ -3,6 +3,7 @@ package crpc
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ndsky1003/crpc/v2/codec"
 	"github.com/ndsky1003/crpc/v2/coder"
@@ -22,14 +23,16 @@ type service struct {
 	weight      int
 	server      *server
 	codec       codec.Codec
+	opt         *option_server
 	sync.Mutex  //读是单线程，写加锁
 }
 
-func newService(server *server, codec codec.Codec) *service {
+func newService(server *server, codec codec.Codec, opt *option_server) *service {
 	s := &service{
 		server: server,
 		codec:  codec,
 		done:   make(chan struct{}),
+		opt:    opt,
 	}
 	return s
 }
@@ -101,21 +104,26 @@ func (this *service) serve() {
 	this.Unlock()
 	h = nil
 	for {
+		//NOTE: client的心跳是15s,且有skip_heart的机制,最少应该2个间隔30秒,加上网络波动+5 = 35
+		readdeadline := *this.opt.ReadDeadline
+		this.codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
 		if h, err = this.codec.ReadHeader(); err != nil {
-			err = fmt.Errorf("%w,%v", ServerError, err)
+			err = fmt.Errorf("1%w,%v", ServerError, err)
 			break
 		}
 
 		var metaData, bodyData []byte
 		if /*h.Type&headertype.Res == 0*/ h.Type.IsReq() {
+			this.codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
 			if metaData, err = this.codec.ReadMetaRawData(h); err != nil {
-				err = fmt.Errorf("%w,%v", ServerError, err)
+				err = fmt.Errorf("2%w,%v", ServerError, err)
 				break
 			}
 		}
 
+		this.codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
 		if bodyData, err = this.codec.ReadBodyRawData(h); err != nil {
-			err = fmt.Errorf("%w,%v", ServerError, err)
+			err = fmt.Errorf("3%w,%v", ServerError, err)
 			break
 		}
 
@@ -123,6 +131,7 @@ func (this *service) serve() {
 		case headertype.Ping:
 			h.Type = headertype.Pong
 			go func() {
+				fmt.Println("ping:", this.name)
 				defer h.Release()
 				this.WriteFrame(h, nil, nil)
 			}()
@@ -176,11 +185,15 @@ func (this *service) WriteRawData(h *header.Header, meta_data, data []byte) erro
 	defer h.Release()
 	this.Lock()
 	defer this.Unlock()
+	writedeadline := *this.opt.WriteDeadline
+	this.codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
 	return this.codec.WriteFrameRawData(h, meta_data, data)
 }
 
 func (this *service) WriteFrame(h *header.Header, meta, v any) error {
 	this.Lock()
 	defer this.Unlock()
+	writedeadline := *this.opt.WriteDeadline
+	this.codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
 	return this.codec.WriteFrame(h, meta, v)
 }
