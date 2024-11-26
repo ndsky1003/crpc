@@ -186,14 +186,20 @@ func (this *service) WriteRawData(h *header.Header, meta_data, data []byte) erro
 	this.Lock()
 	defer this.Unlock()
 	writedeadline := *this.opt.WriteDeadline
-	this.codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
-	return this.codec.WriteFrameRawData(h, meta_data, data)
+	if this.codec != nil {
+		this.codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
+		return this.codec.WriteFrameRawData(h, meta_data, data)
+	}
+	return nil
 }
 
 func (this *service) WriteFrame(h *header.Header, meta, v any) error {
 	this.Lock()
 	defer this.Unlock()
 	writedeadline := *this.opt.WriteDeadline
-	this.codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
-	return this.codec.WriteFrame(h, meta, v)
+	if this.codec != nil {
+		this.codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
+		return this.codec.WriteFrame(h, meta, v)
+	}
+	return nil
 }
