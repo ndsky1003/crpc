@@ -131,7 +131,7 @@ func (this *service) serve() {
 		case headertype.Ping:
 			h.Type = headertype.Pong
 			go func() {
-				fmt.Println("ping:", this.name)
+				// fmt.Println("ping:", this.name)
 				defer h.Release()
 				this.WriteFrame(h, nil, nil)
 			}()
