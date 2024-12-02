@@ -81,6 +81,7 @@ func (this *service) serve() {
 			h.Release()
 			this.close(false)
 			logrus.Errorf("secret is invalid,please change")
+			return
 		}
 	}
 
