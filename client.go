@@ -68,8 +68,8 @@ func Dial(name, url string, opts ...*Option) *Client {
 		SetTimeout(10).
 		SetCheckInterval(1).
 		SetHeartInterval(5).
-		SetReadDeadline(10).
-		SetWriteDeadline(10).
+		SetReadDeadline(15). //5*2 = 10 //大于10才可以,因为如果有有一个方法阻塞了,就会跳过那一轮的心跳,下一轮读就会超时,设个三倍值保准点
+		SetWriteDeadline(15).
 		SetMaxCacheSize(1024).
 		SetChunksMaxSize(defaultChunksSize).Merge(opts...)
 
@@ -218,6 +218,7 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 				SetResCoderT(coder.JSON).
 				SetCompressT(compressor.Raw)
 			codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
+
 			if err = codec.WriteFrame(h, nil, nil); err != nil {
 				err = fmt.Errorf("%w,ping", err)
 				return

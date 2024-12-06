@@ -15,6 +15,11 @@ type service_mgr struct {
 	weight_sum int
 }
 
+func new_service_mgr() *service_mgr {
+	s := &service_mgr{}
+	return s
+}
+
 func (this *service_mgr) RandOne() *service {
 	this.Lock()
 	defer this.Unlock()
@@ -57,7 +62,8 @@ func (this *service_mgr) addService(s *service) error {
 			this.weight_sum = s.weight
 			this.services = []*service{s}
 		} else {
-			return fmt.Errorf("exists service:%v weight:%d < weight:%d", s.name, this.weight_sum, s.weight)
+			err := fmt.Errorf("exists service:%v weight_sum:%d < weight:%d", s.name, this.weight_sum, s.weight)
+			return err
 		}
 	case this.weight_sum > 0:
 		if s.weight < 0 {
@@ -73,7 +79,7 @@ func (this *service_mgr) addService(s *service) error {
 			this.services = append(this.services, s)
 		}
 	}
-	logrus.Info("add service:", s.name)
+	logrus.Info("add service:", s.name, s.weight, s.id)
 	return nil
 }
 
@@ -83,18 +89,25 @@ func (this *service_mgr) removeService(s *service, isClose bool) (int, error) {
 	}
 	this.Lock()
 	defer this.Unlock()
-	var index int
+	index := -1
 	for i, ss := range this.services {
-		if ss.fingerprint == s.fingerprint {
+		if ss.id == s.id {
 			index = i
 		}
 	}
-	this.services = append(this.services[:index], this.services[index+1:]...)
-	if isClose {
-		if err := s.close(false); err != nil {
-			logrus.Error(err)
+	if index != -1 {
+		this.services = append(this.services[:index], this.services[index+1:]...)
+		if isClose {
+			if err := s.close(false); err != nil {
+				logrus.Error(err)
+			}
+		}
+		switch {
+		case this.weight_sum > 0 && s.weight > 0:
+			this.weight_sum -= s.weight
+		case this.weight_sum < 0 && s.weight < 0 && this.weight_sum == s.weight:
+			this.weight_sum = 0
 		}
 	}
-	this.weight_sum -= s.weight
 	return this.weight_sum, nil
 }

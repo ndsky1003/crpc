@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ndsky1003/crpc/v2/codec"
 	"github.com/ndsky1003/crpc/v2/header"
@@ -13,6 +14,7 @@ import (
 
 type server struct {
 	sync.RWMutex
+	index        uint32
 	services     map[string]*service_mgr
 	opt          *option_server
 	codecGenFunc codecFunc
@@ -66,7 +68,8 @@ func (this *server) listen(url string) {
 			logrus.Error(err)
 			continue
 		}
-		service := newService(this, codec, this.opt)
+		id := atomic.AddUint32(&this.index, 1)
+		service := newService(this, id, codec, this.opt)
 		go service.serve()
 	}
 }
@@ -92,10 +95,12 @@ func (this *server) addService(s *service) error {
 	defer this.Unlock()
 	sg, ok := this.services[s.name]
 	if ok {
-		sg.addService(s)
+		return sg.addService(s)
 	} else {
-		sg = &service_mgr{}
-		sg.addService(s)
+		sg = new_service_mgr()
+		if err := sg.addService(s); err != nil {
+			return err
+		}
 		this.services[s.name] = sg
 	}
 	return nil

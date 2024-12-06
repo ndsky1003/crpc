@@ -17,19 +17,20 @@ import (
 // 一个服务名字,可能有多个配套的service,根据权重来负载均衡,并
 // 权重, >0 表示负载均衡,<=0表示互斥,并且保留负数,最小那个,-999 会强制踢掉-998的
 type service struct {
-	name        string
-	done        chan struct{}
-	fingerprint int
-	weight      int
-	server      *server
-	codec       codec.Codec
-	opt         *option_server
-	sync.Mutex  //读是单线程，写加锁
+	id         uint32
+	name       string
+	done       chan struct{}
+	weight     int
+	server     *server
+	codec      codec.Codec
+	opt        *option_server
+	sync.Mutex //读是单线程，写加锁
 }
 
-func newService(server *server, codec codec.Codec, opt *option_server) *service {
+func newService(server *server, id uint32, codec codec.Codec, opt *option_server) *service {
 	s := &service{
 		server: server,
+		id:     id,
 		codec:  codec,
 		done:   make(chan struct{}),
 		opt:    opt,
