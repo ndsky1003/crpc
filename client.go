@@ -189,7 +189,6 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 	}()
 
 	//心跳时间轮里,有消息就跳过,看似很完美,但是如果连续2个时间轮都有消息阻塞,或者执行过长,就是被判断为链接坏掉了,所以旋转放弃这个策略
-	// isSkip_heart := false
 	writedeadline := *this.opt.WriteDeadline
 	for {
 		select {
@@ -201,17 +200,12 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 			}
 			codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
 			if err = codec.WriteFrame(msg.h, msg.meta, msg.body); err != nil {
+				logrus.Error(err)
 				return
 			}
-			// isSkip_heart = true
 			msg.h.Release()
 		case <-ticker.C:
-			// if isSkip_heart {
-			// 	isSkip_heart = false
-			// 	continue
-			// }
 			h := header.Get()
-			defer h.Release()
 			h.SetVersion(this.version).
 				SetType(headertype.Ping).
 				SetMetaCoderT(coder.JSON).
@@ -219,8 +213,7 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 				SetResCoderT(coder.JSON).
 				SetCompressT(compressor.Raw)
 			codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
-
-			if err = codec.WriteFrame(h, nil, nil); err != nil {
+			if err = this.send(h, nil, nil); err != nil {
 				err = fmt.Errorf("%w,ping", err)
 				return
 			}
