@@ -131,11 +131,7 @@ func (this *service) serve() {
 		switch h.Type {
 		case headertype.Ping:
 			h.Type = headertype.Pong
-			go func() {
-				// fmt.Println("ping:", this.name)
-				defer h.Release()
-				this.WriteFrame(h, nil, nil)
-			}()
+			go this.WriteFrame(h, nil, nil)
 		case headertype.Req, headertype.Chunks, headertype.Msg: //forward
 			if e := this.server.WriteRawData(h.ToService, h, metaData, bodyData); e != nil {
 				e = fmt.Errorf("%w,%v", ServerError, e)
@@ -195,6 +191,7 @@ func (this *service) WriteRawData(h *header.Header, meta_data, data []byte) erro
 }
 
 func (this *service) WriteFrame(h *header.Header, meta, v any) error {
+	defer h.Release()
 	this.Lock()
 	defer this.Unlock()
 	writedeadline := *this.opt.WriteDeadline

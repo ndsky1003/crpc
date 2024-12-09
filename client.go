@@ -188,7 +188,7 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 		this.stop(err, stop_version)
 	}()
 
-	isSkip_heart := false
+	// isSkip_heart := false
 	writedeadline := *this.opt.WriteDeadline
 	for {
 		select {
@@ -202,13 +202,13 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 			if err = codec.WriteFrame(msg.h, msg.meta, msg.body); err != nil {
 				return
 			}
-			isSkip_heart = true
+			// isSkip_heart = true
 			msg.h.Release()
 		case <-ticker.C:
-			if isSkip_heart {
-				isSkip_heart = false
-				continue
-			}
+			// if isSkip_heart {
+			// 	isSkip_heart = false
+			// 	continue
+			// }
 			h := header.Get()
 			defer h.Release()
 			h.SetVersion(this.version).
