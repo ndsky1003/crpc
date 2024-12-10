@@ -169,7 +169,7 @@ func (this *Client) serve(codec codec.Codec) (err error) {
 	this.codec = codec
 	this.done = make(chan struct{})
 	this.l.Unlock()
-	logrus.Infof("client %s with connecting", this.name)
+	logrus.Infof("client %s is connected", this.name)
 	this._serve(codec, stop_version)
 	return
 }
@@ -460,7 +460,7 @@ func (this *Client) readPump(codec codec.Codec, stop_version uint32) (err error)
 				}
 			}()
 			if err := this.handle_msg(h, metaData, bodyData); err != nil {
-				logrus.Errorf("err:%v,header:%v\n", err, h)
+				logrus.Errorf("err:%v,header:%+v\n", err, h)
 			}
 		}(h, metaData, bodyData)
 	}

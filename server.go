@@ -13,7 +13,7 @@ import (
 )
 
 type server struct {
-	sync.RWMutex
+	l            sync.Mutex
 	index        uint32
 	services     map[string]*service_mgr
 	opt          *option_server
@@ -78,12 +78,28 @@ func (this *server) getService(name string) (*service, error) {
 	if name == "" {
 		return nil, errors.New("service name is empty")
 	}
-	this.Lock()
-	defer this.Unlock()
-	if sg, ok := this.services[name]; ok {
+	this.l.Lock()
+	sg, ok := this.services[name]
+	this.l.Unlock()
+	if ok {
 		return sg.RandOne(), nil
 	} else {
 		return nil, fmt.Errorf("service name:%s not exist", name)
+	}
+}
+
+func (this *server) getServiceBySid(name string, sid uint32) (*service, error) {
+	this.l.Lock()
+	sg, ok := this.services[name]
+	this.l.Unlock()
+	if ok {
+		if s := sg.GetService(sid); s != nil {
+			return s, nil
+		} else {
+			return nil, fmt.Errorf("service name:%s sid:%d not exist", name, sid)
+		}
+	} else {
+		return nil, fmt.Errorf("service name:%s sid:%d not exist", name, sid)
 	}
 }
 
@@ -91,8 +107,8 @@ func (this *server) addService(s *service) error {
 	if s.name == "" {
 		return errors.New("service name is empty")
 	}
-	this.Lock()
-	defer this.Unlock()
+	this.l.Lock()
+	defer this.l.Unlock()
 	sg, ok := this.services[s.name]
 	if ok {
 		return sg.addService(s)
@@ -110,8 +126,8 @@ func (this *server) removeService(s *service, isClose bool) error {
 	if s.name == "" {
 		return errors.New("service name is empty")
 	}
-	this.Lock()
-	defer this.Unlock()
+	this.l.Lock()
+	defer this.l.Unlock()
 	sg, ok := this.services[s.name]
 	if ok {
 		if w, err := sg.removeService(s, isClose); err == nil && w == 0 {
@@ -127,8 +143,16 @@ func (this *server) WriteRawData(name string, h *header.Header, meta_data, data 
 		return err
 	}
 	if s == nil {
-
 		return fmt.Errorf("%v,暂无可用的service", name)
+	}
+	go s.WriteRawData(h, meta_data, data)
+	return nil
+}
+
+func (this *server) WriteRawDataBySid(fromserver string, sid uint32, h *header.Header, meta_data, data []byte) error {
+	s, err := this.getServiceBySid(fromserver, sid)
+	if err != nil {
+		return err
 	}
 	go s.WriteRawData(h, meta_data, data)
 	return nil

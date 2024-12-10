@@ -42,7 +42,8 @@ func (this *service) serve() {
 	if this == nil {
 		return
 	}
-	h, err := this.codec.ReadHeader()
+	codec := this.codec
+	h, err := codec.ReadHeader()
 	if err != nil {
 		h.Release()
 		this.close(false)
@@ -55,14 +56,14 @@ func (this *service) serve() {
 		logrus.Error("first frame header is error")
 		return
 	}
-	if _, err = this.codec.ReadMetaData(h); err != nil {
+	if _, err = codec.ReadMetaData(h); err != nil {
 		h.Release()
 		this.close(false)
 		logrus.Errorf("read meta data err:%v", err)
 		return
 	}
 
-	bodyData, err := this.codec.ReadBodyData(h)
+	bodyData, err := codec.ReadBodyData(h)
 	if err != nil {
 		h.Release()
 		this.close(false)
@@ -96,7 +97,7 @@ func (this *service) serve() {
 	}
 	this.Lock()
 	h.Type = headertype.Res_Success
-	if err = this.codec.WriteFrame(h, nil, verify_res{Success: true}); err != nil {
+	if err = codec.WriteFrame(h, nil, verify_res{Success: true}); err != nil {
 		h.Release()
 		logrus.Errorf("write verify res is err :%v", err)
 		this.close(true)
@@ -106,25 +107,24 @@ func (this *service) serve() {
 	this.Unlock()
 	h = nil
 	for {
-		//NOTE: client的心跳是15s,且有skip_heart的机制,最少应该2个间隔30秒,加上网络波动+5 = 35
 		readdeadline := *this.opt.ReadDeadline
-		this.codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
-		if h, err = this.codec.ReadHeader(); err != nil {
+		codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
+		if h, err = codec.ReadHeader(); err != nil {
 			err = fmt.Errorf("1%w,%v", ServerError, err)
 			break
 		}
 
 		var metaData, bodyData []byte
 		if h.Type.IsReq() {
-			this.codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
-			if metaData, err = this.codec.ReadMetaRawData(h); err != nil {
+			codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
+			if metaData, err = codec.ReadMetaRawData(h); err != nil {
 				err = fmt.Errorf("2%w,%v", ServerError, err)
 				break
 			}
 		}
 
-		this.codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
-		if bodyData, err = this.codec.ReadBodyRawData(h); err != nil {
+		codec.SetReadDeadline(time.Now().Add(time.Second * readdeadline))
+		if bodyData, err = codec.ReadBodyRawData(h); err != nil {
 			err = fmt.Errorf("3%w,%v", ServerError, err)
 			break
 		}
@@ -134,6 +134,7 @@ func (this *service) serve() {
 			h.Type = headertype.Pong
 			go this.WriteFrame(h, nil, nil)
 		case headertype.Req, headertype.Chunks, headertype.Msg: //forward
+			h.FromSid = this.id
 			if e := this.server.WriteRawData(h.ToService, h, metaData, bodyData); e != nil {
 				e = fmt.Errorf("%w,%v", ServerError, e)
 				logrus.Error(e)
@@ -141,7 +142,7 @@ func (this *service) serve() {
 				go this.WriteFrame(h, nil, e)
 			}
 		case headertype.Res_Success, headertype.Res_Err_Custom, headertype.Res_Err_Standard: //back forward
-			if e := this.server.WriteRawData(h.FromService, h, metaData, bodyData); e != nil {
+			if e := this.server.WriteRawDataBySid(h.FromService, h.FromSid, h, metaData, bodyData); e != nil {
 				logrus.Error(e)
 			}
 		default: //pong

@@ -7,11 +7,12 @@ import (
 	"github.com/ndsky1003/crpc/v2/comm"
 	"github.com/ndsky1003/crpc/v2/compressor"
 	"github.com/ndsky1003/crpc/v2/header/headertype"
+	"github.com/sirupsen/logrus"
 )
 
 const (
-	// MaxHeaderSize = 4 + 2 + 2 + 2 + 2 + 2 + 10 + 10 + 10 + 10 +  4 + 10 + 10 + 4 (10 refer to binary.MaxVarintLen64)
-	MaxHeaderSize = 82
+	// MaxHeaderSize = 4 + 2 + 2 + 2 + 2 + 2 + 10 + 4 + 10 + 10 + 10 +  4 + 10 + 10 + 4 (10 refer to binary.MaxVarintLen64)
+	MaxHeaderSize = 86 //82
 	//防止链接异常，传入的第一个数字过大，导致耗尽系统资源，已经遇到过该问题，所以修复
 	FrozeMaxHeaderSize = MaxHeaderSize + 100 + 100 + 100 + 100 //固定最大header长度,超过这个长度就属于异常数据
 )
@@ -30,6 +31,7 @@ type Header struct {
 	ResCoderT   coder.T //res coder
 	CompressT   compressor.T
 	FromService string //来源服务器
+	FromSid     uint32 //来源服务器的id,这个字段由server覆写
 	ToService   string //目的服务器
 	Module      string
 	Method      string
@@ -71,6 +73,11 @@ func (this *Header) SetCompressT(t compressor.T) *Header {
 
 func (this *Header) SetFromService(s string) *Header {
 	this.FromService = s
+	return this
+}
+
+func (this *Header) SetFromSid(sid uint32) *Header {
+	this.FromSid = sid
 	return this
 }
 
@@ -134,6 +141,9 @@ func (r *Header) Marshal() []byte {
 
 	idx += comm.BinaryWriteString(header[idx:], r.FromService)
 
+	binary.LittleEndian.PutUint32(header[idx:], r.FromSid)
+	idx += comm.Uint32Size
+
 	idx += comm.BinaryWriteString(header[idx:], r.ToService)
 
 	idx += comm.BinaryWriteString(header[idx:], r.Module)
@@ -160,6 +170,7 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
+			logrus.Error("recover:", r)
 			err = comm.UnmarshalError
 		}
 	}()
@@ -184,6 +195,9 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 
 	r.FromService, size = comm.BinaryReadString(data[idx:])
 	idx += size
+
+	r.FromSid = binary.LittleEndian.Uint32(data[idx:])
+	idx += comm.Uint32Size
 
 	r.ToService, size = comm.BinaryReadString(data[idx:])
 	idx += size
@@ -218,6 +232,7 @@ func (r *Header) Reset() {
 	r.ResCoderT = 0
 	r.CompressT = 0
 	r.FromService = ""
+	r.FromSid = 0
 	r.ToService = ""
 	r.Module = ""
 	r.Method = ""

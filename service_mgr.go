@@ -10,7 +10,7 @@ import (
 )
 
 type service_mgr struct {
-	sync.Mutex
+	rwl        sync.RWMutex
 	services   []*service
 	weight_sum int
 }
@@ -21,8 +21,8 @@ func new_service_mgr() *service_mgr {
 }
 
 func (this *service_mgr) RandOne() *service {
-	this.Lock()
-	defer this.Unlock()
+	this.rwl.RLock()
+	defer this.rwl.RUnlock()
 	if len(this.services) > 0 {
 		if this.weight_sum > 0 {
 			r := rand.IntN(this.weight_sum)
@@ -39,6 +39,17 @@ func (this *service_mgr) RandOne() *service {
 	return nil
 }
 
+func (this *service_mgr) GetService(sid uint32) *service {
+	this.rwl.RLock()
+	defer this.rwl.RUnlock()
+	for _, s := range this.services {
+		if s.id == sid {
+			return s
+		}
+	}
+	return nil
+}
+
 func (this *service_mgr) addService(s *service) error {
 	if s.name == "" {
 		return errors.New("service name is empty")
@@ -46,8 +57,8 @@ func (this *service_mgr) addService(s *service) error {
 	if s.weight == 0 {
 		return errors.New("service weight is zero")
 	}
-	this.Lock()
-	defer this.Unlock()
+	this.rwl.Lock()
+	defer this.rwl.Unlock()
 	switch {
 	case this.weight_sum == 0:
 		this.weight_sum = s.weight
@@ -79,7 +90,7 @@ func (this *service_mgr) addService(s *service) error {
 			this.services = append(this.services, s)
 		}
 	}
-	logrus.Info("add service:", s.name, s.weight, s.id)
+	logrus.Infof("add service:%v weight:%d id:%d", s.name, s.weight, s.id)
 	return nil
 }
 
@@ -87,8 +98,8 @@ func (this *service_mgr) removeService(s *service, isClose bool) (int, error) {
 	if s == nil {
 		return this.weight_sum, nil
 	}
-	this.Lock()
-	defer this.Unlock()
+	this.rwl.Lock()
+	defer this.rwl.Unlock()
 	index := -1
 	for i, ss := range this.services {
 		if ss.id == s.id {
