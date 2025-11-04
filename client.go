@@ -225,6 +225,7 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 				SetResCoderT(coder.JSON).
 				SetCompressT(compressor.Raw)
 			codec.SetWriteDeadline(now.Add(time.Second * writedeadline))
+			logrus.Debug("send ping to server")
 			if err = codec.WriteFrame(h, nil, nil); err != nil {
 				err = fmt.Errorf("%w,ping", err)
 				return
@@ -258,6 +259,7 @@ func (this *Client) stop(err error, stop_version uint32) {
 	}
 	this.seq = 0
 	this.pending = make(map[uint64]*Call)
+	this.pong_time = time.Time{}
 	this.isStop = true
 
 	logrus.Infof("Client %s stopped", this.name)
@@ -458,6 +460,7 @@ func (this *Client) readPump(codec codec.Codec, stop_version uint32) (err error)
 
 		if h.Type == headertype.Pong {
 			h.Release()
+			logrus.Debug("receive pong from server")
 			this.pong_time = time.Now()
 			continue
 		}
