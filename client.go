@@ -44,6 +44,8 @@ type Client struct {
 	stop_version uint32
 	done         chan struct{}
 	sendChan     chan *send_msg
+
+	pong_time time.Time //实现双向的ping pong机制，否则容易出现假死状态
 }
 
 func Dial(name, url string, opts ...*Option) *Client {
@@ -184,6 +186,7 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 	sendChan := this.sendChan
 	var err error
 	defer func() {
+		logrus.Info("writePump exit:", err)
 		ticker.Stop()
 		this.stop(err, stop_version)
 	}()
@@ -202,13 +205,17 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 			if err = codec.WriteFrame(msg.h, msg.meta, msg.body); err != nil {
 				return
 			}
-			// isSkip_heart = true
 			msg.h.Release()
 		case <-ticker.C:
-			// if isSkip_heart {
-			// 	isSkip_heart = false
-			// 	continue
-			// }
+			now := time.Now()
+			if this.pong_time.IsZero() {
+				this.pong_time = now
+			} else {
+				if now.Sub(this.pong_time) > (*this.opt.HeartInterval+1)*time.Second {
+					err = fmt.Errorf("pong timeout")
+					return
+				}
+			}
 			h := header.Get()
 			defer h.Release()
 			h.SetVersion(this.version).
@@ -217,7 +224,7 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 				SetReqCoderT(coder.JSON).
 				SetResCoderT(coder.JSON).
 				SetCompressT(compressor.Raw)
-			codec.SetWriteDeadline(time.Now().Add(time.Second * writedeadline))
+			codec.SetWriteDeadline(now.Add(time.Second * writedeadline))
 			if err = codec.WriteFrame(h, nil, nil); err != nil {
 				err = fmt.Errorf("%w,ping", err)
 				return
@@ -227,12 +234,15 @@ func (this *Client) writePump(codec codec.Codec, stop_version uint32) {
 }
 
 func (this *Client) stop(err error, stop_version uint32) {
+	logrus.Infof("Stopping client %s called,err:%+v,stop_version:%v", this.name, err, stop_version)
 	this.l.Lock()
 	defer this.l.Unlock()
 	if this.isStop {
+		logrus.Infof("Stopping client %s called,err:%+v,stop_version:%v", this.name, err, stop_version)
 		return
 	}
 	if this.stop_version != stop_version {
+		logrus.Infof("Stopping client %s called,err:%+v,stop_version:%v", this.name, err, stop_version)
 		return
 	}
 	logrus.Infof("Stopping client %s with error: %v", this.name, err)
@@ -448,6 +458,7 @@ func (this *Client) readPump(codec codec.Codec, stop_version uint32) (err error)
 
 		if h.Type == headertype.Pong {
 			h.Release()
+			this.pong_time = time.Now()
 			continue
 		}
 
