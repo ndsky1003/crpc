@@ -15,7 +15,7 @@ import (
 	"text/template"
 )
 
-const VERSION = "v1.0.1"
+const VERSION = "v1.0.3"
 
 const (
 	Annotation_IsNotGen       = "IsNotGen" // 跳过这个方法自动生成
@@ -76,8 +76,8 @@ func main() {
 		fmt.Printf("  %s: 额外参数，多个参数用逗号分隔,别名用冒号分开。eg: --append_req=tt:time,opts:...crpc.Option\n", Annotation_ReqOption)
 		fmt.Printf("  %s: var %%v int ,var %%v = MyType{}, %%v = MyMap{} 注意占位符,一般都是自定义类型需要，eg: type MyMap map[string]int 这种\n", Annotation_TypeElemInit)
 		fmt.Printf("  %s: 就是调用call的时候的那个属性名字\n", Annotation_CallOptionName)
-		fmt.Println(`// @crpc: FuncName: func111
-// @crpc: Client: crpc_client_ano
+		s := `// @crpc: FuncName: func111
+			// @crpc: Client: crpc_client_ano
 // @crpc: Server: server2
 // @crpc: Module:mod3
 // @crpc: ReqOption: opts ...crpc.Option
@@ -88,7 +88,8 @@ func main() {
 // @crpc: TypeElemInit: %v = Myerror{}
 // aa
 // nihao
-`)
+		`
+		fmt.Println(s)
 		return
 	}
 
@@ -109,16 +110,17 @@ func main() {
 	}
 	if out_dir == "" {
 		out_dir = dir
-		filename = filename[:len(filename)-3]
-		filename_new := fmt.Sprintf("%s%s.go", filename, suffix)
-		if out_file_name != "" {
-			filename_new = out_file_name
-		}
-
-		out_file_path = filepath.Join(out_dir, filename_new)
+	}
+	filename = filename[:len(filename)-3]
+	filename_new := fmt.Sprintf("%s%s.go", filename, suffix)
+	if out_file_name != "" {
+		filename_new = out_file_name
 	}
 
-	fmt.Println("解析文件:", file_path)
+	out_file_path = filepath.Join(out_dir, filename_new)
+
+	fmt.Println(os.Getwd())
+	fmt.Println("解析文件:", file_path, out_file_path)
 	// 解析 Go 文件
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, file_path, nil, parser.ParseComments)
@@ -153,6 +155,7 @@ func main() {
 
 	outFile, err := os.OpenFile(out_file_path, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
 	if err != nil {
+		fmt.Println("无法创建输出文件:", err)
 		return
 	}
 	defer outFile.Close()
