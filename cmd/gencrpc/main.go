@@ -15,7 +15,7 @@ import (
 	"text/template"
 )
 
-const VERSION = "v1.0.0"
+const VERSION = "v1.0.1"
 
 const (
 	Annotation_IsNotGen       = "IsNotGen" // 跳过这个方法自动生成
