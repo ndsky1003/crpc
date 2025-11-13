@@ -53,7 +53,7 @@ func main() {
 	flag.StringVar(&out_file_name, "out_file_name", "", "输出的新文件名")
 	flag.StringVar(&suffix, "sub", "_crpc_gen", "输出的新文件的后缀")
 	flag.StringVar(&imports, "import", "", "额外需要导入的包，多个包用逗号分隔,别名用冒号分开。eg: --import=jj:encoding/json,tt:time")
-	flag.StringVar(&data.PackageName, "packagename", "main", "生成代码时使用的包名")
+	flag.StringVar(&data.PackageName, "package", "main", "生成代码时使用的包名")
 	flag.StringVar(&data.Client, "client", "crpc_client", "生成客户端代码时使用的变量名")
 	flag.StringVar(&data.Server, "server", "crpc_server_name", "调用哪个服务")
 	flag.StringVar(&data.Module, "module", "crpc", "生成代码时使用的模块名")
