@@ -22,13 +22,16 @@ import (
 {{ $value }}
 {{- end }}
 func {{.NameFunc}}({{range $index, $param := .In}}{{if $index}}, {{end}}{{.Name}} {{.Type}}{{end}}){{if .Return}}({{range $index, $return := .Return}}{{if $index}}, {{end}}{{.Name}} {{.Type}}{{end}}){{end}} {
-{{- if .Content}}
+{{- if .Contents}}
 {{- range $index, $line := .Content}}
 {{ $line }}
 {{- end}}
 {{- else}}
-{{- if .IsAsync }}
+{{- if .CallOptionVar}}
+{{- .CallOptionVar }}
+{{- end}}
 
+{{- if .IsAsync }}
 {{- if .Out}}
 {{- range $index, $return := .Out}}
 {{- if ne  .Name  "err" }}
@@ -36,7 +39,6 @@ var {{.Name}} {{.Type}}
 {{- end}}
 {{- end}}
 {{- end}}
-
 {{- end }}
 {{- if .Out }}
 {{- range $index, $return := .Out}}

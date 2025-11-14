@@ -15,7 +15,7 @@ import (
 	"text/template"
 )
 
-const VERSION = "v1.0.5"
+const VERSION = "v2.0.17"
 
 const (
 	Annotation_IsSkip         = "IsSkip"   // 跳过这个方法自动生成
@@ -25,9 +25,10 @@ const (
 	Annotation_Client         = "Client"
 	Annotation_Server         = "Server"
 	Annotation_Module         = "Module"
-	Annotation_ReqOption      = "ReqOption"
+	Annotation_ReqAppend      = "ReqAppend"
 	Annotation_TypeElemInit   = "TypeElemInit" // var %v int ,var %v = MyType{}, %v = MyMap{} 注意占位符,一般都是自定义类型需要，eg: type MyMap map[string]int 这种
 	Annotation_CallOptionName = "CallOptionName"
+	Annotation_SetOption      = "SetOption"
 )
 
 var (
@@ -63,7 +64,7 @@ func main() {
 	flag.StringVar(&data.Server, "server", "crpc_server_name", "调用哪个服务")
 	flag.StringVar(&data.Module, "module", "crpc", "生成代码时使用的模块名")
 	flag.StringVar(&data.Req_Append, "req_append", "opts:...crpc.Option", "额外参数，多个参数用逗号分隔,冒号分割变量与类型,注解支持空格,命令行不支持空格,所以用冒号。eg: --append_req=tt:time,opts:...crpc.Option")
-	flag.StringVar(&data.Call_Option_Name, "call_option_name", "opts...", "就是调用call的时候的那个属性名字")
+	flag.StringVar(&data.Call_Option_Name, "call_option_name", "", "就是调用call的时候的那个属性名字")
 	flag.Parse()
 	if *version_flag || *v_flag {
 		fmt.Println(VERSION)
@@ -72,7 +73,7 @@ func main() {
 
 	if *useage_flag {
 		fmt.Println("使用规则:")
-		fmt.Println("go文件://go:generate gencrpc --import=jingtw/comm/crpc,jingtw/comm/gamename --out_dir=../comm/crpc/db/ --package=db --req_append=opts ...crpc.Option --client=crpc.GameClient --server=string(gamename.DB)")
+		fmt.Println("go文件://go:generate gencrpc --import=jingtw/comm/crpc,jingtw/comm/gamename --out_dir=../comm/crpc/db/ --package=db --req_append=opts:...*crpc.Option --client=crpc.GameClient --server=string(gamename.DB)")
 		fmt.Println("终端:gencrpc --import=jingtw/comm/crpc,jingtw/comm/gamename --out_dir=../comm/crpc/db/ --package=db --req_append=opts ...crpc.Option --client=crpc.GameClient --server=string(gamename.DB)")
 		return
 	}
@@ -86,7 +87,7 @@ func main() {
 		fmt.Printf("  %s: 生成客户端代码时使用的变量名\n", Annotation_Client)
 		fmt.Printf("  %s: 调	用哪个服务\n", Annotation_Server)
 		fmt.Printf("  %s: 生成代码时使用的模块名\n", Annotation_Module)
-		fmt.Printf("  %s: 额外参数，多个参数用逗号分隔。eg: --append_req=tt time,opts ...crpc.Option\n", Annotation_ReqOption)
+		fmt.Printf("  %s: 额外参数，多个参数用逗号分隔。eg: --append_req=tt time,opts ...crpc.Option\n", Annotation_ReqAppend)
 		fmt.Printf("  %s: var %%v int ,var %%v = MyType{}, %%v = MyMap{} 注意占位符,一般都是自定义类型需要，eg: type MyMap map[string]int 这种\n", Annotation_TypeElemInit)
 		fmt.Printf("  %s: 就是调用call的时候的那个属性名字\n", Annotation_CallOptionName)
 		s := `  // @crpc: FuncName: func111
@@ -94,12 +95,13 @@ func main() {
   // @crpc: SubAsync: Async
   // @crpc: Server: server2
   // @crpc: Module:mod3
-  // @crpc: ReqOption: opts ...crpc.Option
-  // @crpc: RetType: MyMap
+  // @crpc: ReqAppend: opts ...crpc.Option
   // @crpc: IsSkip: 2
-  // @crpc: CallOptionName: opts3...
+  // @crpc: CallOptionName: opt
   // @crpc: TypeElemInit:var %v = MyMap{}
   // @crpc: TypeElemInit: %v = Myerror{}
+  // @crpc: SetOption: SetCoderT(coder.Msgp)
+  // @crpc: SetOption: SetCoderT(coder.Msgp)
 `
 		fmt.Println(s)
 		return
@@ -304,7 +306,8 @@ type func_decl struct {
 	Receiver           string                  //接收者类型
 	Comments_anotation map[string]anotations   //注解
 	Comments           anotations              //注解
-	Content            anotations              //完全替代内容实现，不包含函数签名
+	Contents           anotations              //完全替代内容实现，不包含函数签名
+	SetOptions         anotations              //设置选项
 	In                 []*func_param_in_or_out //原始函数的入参
 	Out                []*func_param_in_or_out //原始函数的返回值
 	Return             []*func_param_in_or_out //生成函数的返回值
@@ -315,6 +318,7 @@ type func_decl struct {
 	ReqAppend          string
 	ReqFirst           *func_param_in_or_out //第一个参数名
 	RetFirst           *func_param_in_or_out //第一个返回值名
+	CallOptionVar      string                //opt declaration variable name
 	CallReqName        string                //请求参数变量名
 	CallRetName        string                //返回值变量名
 	CallOptionName     string
@@ -462,7 +466,8 @@ func handleFuncDecl(funcSpec *ast.FuncDecl, is_async bool) (res *func_decl) {
 		}
 	}
 
-	res.Content, _ = res.Comments_anotation[Annotation_Content]
+	res.Contents, _ = res.Comments_anotation[Annotation_Content]
+	res.SetOptions, _ = res.Comments_anotation[Annotation_SetOption]
 	res.NameFunc, _ = res.Comments_anotation[Annotation_FuncName].append(name_func).fist()
 	sub_sync, _ := res.Comments_anotation[Annotation_SubAsync].append(data.SubAsync).fist()
 	if sub_sync != "" && is_async {
@@ -471,7 +476,7 @@ func handleFuncDecl(funcSpec *ast.FuncDecl, is_async bool) (res *func_decl) {
 	res.Client, _ = res.Comments_anotation[Annotation_Client].append(data.Client).fist()
 	res.Server, _ = res.Comments_anotation[Annotation_Server].append(data.Server).fist()
 	res.Module, _ = res.Comments_anotation[Annotation_Module].append(data.Module).fist()
-	res.ReqAppend, _ = res.Comments_anotation[Annotation_ReqOption].append(data.Req_Append).fist()
+	res.ReqAppend, _ = res.Comments_anotation[Annotation_ReqAppend].append(data.Req_Append).fist()
 	res.CallOptionName, _ = res.Comments_anotation[Annotation_CallOptionName].append(data.Call_Option_Name).fist()
 	// 获取返回值信息
 	for index, result := range funcSpec.Type.Results.List {
@@ -535,6 +540,7 @@ func handleFuncDecl(funcSpec *ast.FuncDecl, is_async bool) (res *func_decl) {
 	}
 
 	// 获取参数信息
+	last_param_name := ""
 	if funcSpec.Type.Params != nil {
 		param_index := 0
 		for _, param := range funcSpec.Type.Params.List {
@@ -548,6 +554,7 @@ func handleFuncDecl(funcSpec *ast.FuncDecl, is_async bool) (res *func_decl) {
 					Name: name.Name,
 					Type: getFieldType(param.Type),
 				}
+				last_param_name = v.Name
 				v.fixFullTypeName()
 				res.In = append(res.In, v)
 				param_index++
@@ -565,11 +572,31 @@ func handleFuncDecl(funcSpec *ast.FuncDecl, is_async bool) (res *func_decl) {
 					Name: arg,
 					Type: type_str,
 				}
+				last_param_name = v.Name
 				v.fixFullTypeName()
 				res.In = append(res.In, v)
 			}
 		}
 	}
+
+	if res.CallOptionName == "" {
+		res.CallOptionName = "opt"
+	}
+	if len(res.SetOptions) > 0 {
+		var set_options []string
+		for _, v := range res.SetOptions {
+			set_options = append(set_options, v)
+		}
+		set_option_str := strings.Join(set_options, ".")
+		if set_option_str != "" {
+			set_option_str = "." + set_option_str
+		}
+		call_option_var := fmt.Sprintf("%v := crpc.Options()%v.Merge(%v...)", res.CallOptionName, set_option_str, last_param_name)
+		res.CallOptionVar = call_option_var
+	} else {
+		res.CallOptionName = fmt.Sprintf("%v...", last_param_name)
+	}
+
 	if len(res.In) >= 1 {
 		res.ReqFirst = res.In[0]
 		res.CallReqName = res.ReqFirst.Name
