@@ -21,12 +21,23 @@ import (
 {{- range $index,$value := .Comments}}
 {{ $value }}
 {{- end }}
-func {{.NameFunc}}({{range $index, $param := .In}}{{if $index}}, {{end}}{{.Name}} {{.Type}}{{end}}){{if .Out}}({{range $index, $return := .Out}}{{if $index}}, {{end}}{{.Name}} {{.Type}}{{end}}){{end}} {
+func {{.NameFunc}}({{range $index, $param := .In}}{{if $index}}, {{end}}{{.Name}} {{.Type}}{{end}}){{if .Return}}({{range $index, $return := .Return}}{{if $index}}, {{end}}{{.Name}} {{.Type}}{{end}}){{end}} {
 {{- if .Content}}
 {{- range $index, $line := .Content}}
 {{ $line }}
 {{- end}}
 {{- else}}
+{{- if .IsAsync }}
+
+{{- if .Out}}
+{{- range $index, $return := .Out}}
+{{- if ne  .Name  "err" }}
+var {{.Name}} {{.Type}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{- end }}
 {{- if .Out }}
 {{- range $index, $return := .Out}}
 {{- if .Type_elem_init }}
@@ -34,9 +45,14 @@ func {{.NameFunc}}({{range $index, $param := .In}}{{if $index}}, {{end}}{{.Name}
 {{- end}}
 {{- end}}
 {{- end}}
+{{- if .IsAsync}}
+call =  {{.Client}}.Go({{.Server}}, "{{.Module}}.{{.Name}}", {{.CallReqName}}, {{.CallRetName}}, {{.CallOptionName}})
+{{- else}}
 err =  {{.Client}}.Call({{.Server}}, "{{.Module}}.{{.Name}}", {{.CallReqName}}, {{.CallRetName}}, {{.CallOptionName}})
+{{- end}}
 {{- end}}
 return
 }
-{{- end }}
+
+{{ end }}
 

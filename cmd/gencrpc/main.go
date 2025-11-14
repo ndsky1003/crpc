@@ -15,10 +15,11 @@ import (
 	"text/template"
 )
 
-const VERSION = "v1.0.3"
+const VERSION = "v1.0.5"
 
 const (
-	Annotation_IsNotGen       = "IsNotGen" // 跳过这个方法自动生成
+	Annotation_IsSkip         = "IsSkip"   // 跳过这个方法自动生成
+	Annotation_SubAsync       = "SubAsync" // 异步方法的后缀
 	Annotation_Content        = "Content"  //完全替代内容实现，不包含函数签名
 	Annotation_FuncName       = "FuncName"
 	Annotation_Client         = "Client"
@@ -34,61 +35,72 @@ var (
 	out_dir       string
 	out_file_name string
 	suffix        string
-	imports       string
 )
 var out_file_path string
 
 // 格式化 Go 文件
 func formatGoFile(filePath string) error {
-	cmd := exec.Command("gofmt", "-w", filePath)
+	cmd := exec.Command("goimports", "-w", filePath)
 	return cmd.Run()
 }
 
 func main() {
-	flag.String("useage", "", `gencrpc --req_option="jj int,cc string,opts ...crpc.Option" --packagename main --client "crpc_client1" --server=server1 --module="mod1" --call_option_name=opts1... --sub=ccccc`)
+	useage_flag := flag.Bool("useage", false, "显示使用规则")
 	version_flag := flag.Bool("version", false, "显示版本信息")
+	v_flag := flag.Bool("v", false, "显示版本信息")
 	annotation_flag := flag.Bool("annotation", false, "显示标注信息")
+	a_flag := flag.Bool("a", false, "显示标注信息")
 	flag.StringVar(&file_path, "f", "", "需要解析的文件")
 	flag.StringVar(&out_dir, "out_dir", "", "输出的新文件目录")
 	flag.StringVar(&out_file_name, "out_file_name", "", "输出的新文件名")
 	flag.StringVar(&suffix, "sub", "_crpc_gen", "输出的新文件的后缀")
-	flag.StringVar(&imports, "import", "", "额外需要导入的包，多个包用逗号分隔,别名用冒号分开。eg: --import=jj:encoding/json,tt:time")
+	flag.StringVar(&data.Imports, "import", "", "额外需要导入的包，多个包用逗号分隔,别名用冒号分开。eg: --import=jj:encoding/json,tt:time")
 	flag.StringVar(&data.PackageName, "package", "main", "生成代码时使用的包名")
+	flag.BoolVar(&data.IsSync, "sync", true, "是否生成同步方法")
+	flag.BoolVar(&data.IsAsync, "async", false, "是否生成异步方法")
+	flag.StringVar(&data.SubAsync, "sub_async", "Async", "异步方法的后缀")
 	flag.StringVar(&data.Client, "client", "crpc_client", "生成客户端代码时使用的变量名")
 	flag.StringVar(&data.Server, "server", "crpc_server_name", "调用哪个服务")
 	flag.StringVar(&data.Module, "module", "crpc", "生成代码时使用的模块名")
-	flag.StringVar(&data.Req_Option, "req_option", "opts:...crpc.Option", "额外参数，多个参数用逗号分隔,别名用冒号分开。eg: --append_req=tt:time,opts:...crpc.Option")
+	flag.StringVar(&data.Req_Append, "req_append", "opts:...crpc.Option", "额外参数，多个参数用逗号分隔,冒号分割变量与类型,注解支持空格,命令行不支持空格,所以用冒号。eg: --append_req=tt:time,opts:...crpc.Option")
 	flag.StringVar(&data.Call_Option_Name, "call_option_name", "opts...", "就是调用call的时候的那个属性名字")
 	flag.Parse()
-	if *version_flag {
+	if *version_flag || *v_flag {
 		fmt.Println(VERSION)
 		return
 	}
 
-	if *annotation_flag {
+	if *useage_flag {
+		fmt.Println("使用规则:")
+		fmt.Println("go文件://go:generate gencrpc --import=jingtw/comm/crpc,jingtw/comm/gamename --out_dir=../comm/crpc/db/ --package=db --req_append=opts ...crpc.Option --client=crpc.GameClient --server=string(gamename.DB)")
+		fmt.Println("终端:gencrpc --import=jingtw/comm/crpc,jingtw/comm/gamename --out_dir=../comm/crpc/db/ --package=db --req_append=opts ...crpc.Option --client=crpc.GameClient --server=string(gamename.DB)")
+		return
+	}
+
+	if *annotation_flag || *a_flag {
 		fmt.Println("标注信息:")
-		fmt.Printf("  %s: 跳过这个方法自动生成\n", Annotation_IsNotGen)
+		fmt.Printf("  %s: 跳过这个方法自动生成\n", Annotation_IsSkip)
+		fmt.Printf("  %s: 异步方法的后缀\n", Annotation_SubAsync)
 		fmt.Printf("  %s: 完全替代内容实现，不包含函数签名\n", Annotation_Content)
 		fmt.Printf("  %s: 函数名，可以被覆盖\n", Annotation_FuncName)
 		fmt.Printf("  %s: 生成客户端代码时使用的变量名\n", Annotation_Client)
 		fmt.Printf("  %s: 调	用哪个服务\n", Annotation_Server)
 		fmt.Printf("  %s: 生成代码时使用的模块名\n", Annotation_Module)
-		fmt.Printf("  %s: 额外参数，多个参数用逗号分隔,别名用冒号分开。eg: --append_req=tt:time,opts:...crpc.Option\n", Annotation_ReqOption)
+		fmt.Printf("  %s: 额外参数，多个参数用逗号分隔。eg: --append_req=tt time,opts ...crpc.Option\n", Annotation_ReqOption)
 		fmt.Printf("  %s: var %%v int ,var %%v = MyType{}, %%v = MyMap{} 注意占位符,一般都是自定义类型需要，eg: type MyMap map[string]int 这种\n", Annotation_TypeElemInit)
 		fmt.Printf("  %s: 就是调用call的时候的那个属性名字\n", Annotation_CallOptionName)
-		s := `// @crpc: FuncName: func111
-			// @crpc: Client: crpc_client_ano
-// @crpc: Server: server2
-// @crpc: Module:mod3
-// @crpc: ReqOption: opts ...crpc.Option
-// @crpc: RetType: MyMap
-// @crpc: IsNotGen: 2
-// @crpc: CallOptionName: opts3...
-// @crpc: TypeElemInit:var %v = MyMap{}
-// @crpc: TypeElemInit: %v = Myerror{}
-// aa
-// nihao
-		`
+		s := `  // @crpc: FuncName: func111
+  // @crpc: Client: crpc_client_ano
+  // @crpc: SubAsync: Async
+  // @crpc: Server: server2
+  // @crpc: Module:mod3
+  // @crpc: ReqOption: opts ...crpc.Option
+  // @crpc: RetType: MyMap
+  // @crpc: IsSkip: 2
+  // @crpc: CallOptionName: opts3...
+  // @crpc: TypeElemInit:var %v = MyMap{}
+  // @crpc: TypeElemInit: %v = Myerror{}
+`
 		fmt.Println(s)
 		return
 	}
@@ -119,8 +131,6 @@ func main() {
 
 	out_file_path = filepath.Join(out_dir, filename_new)
 
-	fmt.Println(os.Getwd())
-	fmt.Println("解析文件:", file_path, out_file_path)
 	// 解析 Go 文件
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, file_path, nil, parser.ParseComments)
@@ -141,8 +151,15 @@ func main() {
 				data.Importor_all[importor.Name] = importor
 			}
 		case *ast.FuncDecl:
-			if func_desc := handleFuncDecl(n); func_desc != nil {
-				data.Funcs = append(data.Funcs, func_desc)
+			if data.IsSync {
+				if func_desc := handleFuncDecl(n, false); func_desc != nil {
+					data.Funcs = append(data.Funcs, func_desc)
+				}
+			}
+			if data.IsAsync {
+				if func_desc := handleFuncDecl(n, true); func_desc != nil {
+					data.Funcs = append(data.Funcs, func_desc)
+				}
 			}
 		}
 		return true
@@ -184,11 +201,15 @@ type Data struct {
 	Importor_all     map[string]*import_value
 	Importor_need    map[string]*import_value
 	Importor_extra   []*import_value
+	Imports          string
 	PackageName      string
+	IsSync           bool //是否生成同步方法
+	IsAsync          bool //是否生成异步方法
+	SubAsync         string
 	Client           string
 	Server           string
 	Module           string
-	Req_Option       string
+	Req_Append       string
 	Call_Option_Name string
 	Funcs            []*func_decl
 }
@@ -212,7 +233,7 @@ func (this *Data) FixImportorNeedList() {
 			}
 		}
 	}
-	if imports != "" {
+	if imports := data.Imports; imports != "" {
 		parts := strings.Split(imports, ",")
 		for _, part := range parts {
 			subparts := strings.SplitN(part, ":", 2)
@@ -233,7 +254,6 @@ func (this *Data) FixImportorNeedList() {
 			}
 		}
 	}
-
 }
 
 var data = &Data{
@@ -279,17 +299,19 @@ func (a anotations) fist() (string, bool) {
 }
 
 type func_decl struct {
-	Name               string                //函数名
-	NameFunc           string                //函数名，可以被覆盖
-	Receiver           string                //接收者类型
-	Comments_anotation map[string]anotations //注解
-	Comments           anotations            //注解
-	Content            anotations            //完全替代内容实现，不包含函数签名
-	In                 []*func_param_in_or_out
-	Out                []*func_param_in_or_out
+	Name               string                  //函数名
+	NameFunc           string                  //函数名，可以被覆盖
+	Receiver           string                  //接收者类型
+	Comments_anotation map[string]anotations   //注解
+	Comments           anotations              //注解
+	Content            anotations              //完全替代内容实现，不包含函数签名
+	In                 []*func_param_in_or_out //原始函数的入参
+	Out                []*func_param_in_or_out //原始函数的返回值
+	Return             []*func_param_in_or_out //生成函数的返回值
 	Client             string
 	Server             string
 	Module             string
+	IsAsync            bool
 	ReqAppend          string
 	ReqFirst           *func_param_in_or_out //第一个参数名
 	RetFirst           *func_param_in_or_out //第一个返回值名
@@ -307,14 +329,23 @@ type func_param_in_or_out struct {
 	Type_elem_init  string //default "" {} ,非指针类型的怎么初始化 空串直接声明，{}是map，[]的初始化， 指针类型一律用这个类型初始化出来，然后取地址
 }
 
+var fix_import_pre_reg = regexp.MustCompile(`^[\[\]\.\*]*`)
+
 func (this *func_param_in_or_out) fixFullTypeName() {
 	if this.Type == "" {
 		return
 	}
-	parts := strings.Split(this.Type, ".")
+
+	tmp_type := this.Type
+	if strings.HasPrefix(tmp_type, "...") {
+		tmp_type = strings.TrimPrefix(tmp_type, "...")
+	}
+	parts := strings.Split(tmp_type, ".")
 	if len(parts) == 2 {
 		this.ImportPre = parts[0]
+		this.ImportPre = fix_import_pre_reg.ReplaceAllString(this.ImportPre, "")
 	}
+
 	this.Type_is_pointer = strings.HasPrefix(this.Type, "*")
 	this.Type_elem = strings.TrimPrefix(this.Type, "*")
 	if this.Type_is_pointer {
@@ -351,7 +382,7 @@ func (this *func_param_in_or_out) String() string {
 }
 
 var get_comment_key_value_reg = regexp.MustCompile(`^//\s*@crpc:\s*([^\s]+):\s*(.*)`)
-var get_req_arg_type_reg = regexp.MustCompile(`^([^\s]+)\s+([^\s]+)$`)
+var get_req_arg_type_reg = regexp.MustCompile(`^([^\s]+)[\s:]+([^\s]+)$`)
 
 func get_req_arg_type(str string) (arg, type_str string, ok bool) {
 	matches := get_req_arg_type_reg.FindStringSubmatch(str)
@@ -369,7 +400,7 @@ func get_comment_anotation_key_value(comment string) (string, string, bool) {
 	return "", "", false
 }
 
-func handleFuncDecl(funcSpec *ast.FuncDecl) (res *func_decl) {
+func handleFuncDecl(funcSpec *ast.FuncDecl, is_async bool) (res *func_decl) {
 
 	if funcSpec.Type.Params == nil {
 		return
@@ -408,8 +439,11 @@ func handleFuncDecl(funcSpec *ast.FuncDecl) (res *func_decl) {
 		return
 	}
 
+	name_func := funcSpec.Name.Name
+
 	res = &func_decl{
-		Name:               funcSpec.Name.Name,
+		Name:               name_func,
+		IsAsync:            is_async,
 		Comments_anotation: map[string]anotations{},
 	}
 	// 打印函数的注释
@@ -422,17 +456,22 @@ func handleFuncDecl(funcSpec *ast.FuncDecl) (res *func_decl) {
 			}
 		}
 	}
-	if v, ok := res.Comments_anotation[Annotation_IsNotGen]; ok {
-		if v1, ok1 := v.fist(); ok1 && (v1 == "true" || v1 == "1") {
+	if v, ok := res.Comments_anotation[Annotation_IsSkip]; ok {
+		if v1, ok1 := v.fist(); ok1 && !(v1 == "false" || v1 == "0" || v1 == "") { // 非0则为真
 			return nil
 		}
 	}
+
 	res.Content, _ = res.Comments_anotation[Annotation_Content]
-	res.NameFunc, _ = res.Comments_anotation[Annotation_FuncName].append(res.Name).fist()
+	res.NameFunc, _ = res.Comments_anotation[Annotation_FuncName].append(name_func).fist()
+	sub_sync, _ := res.Comments_anotation[Annotation_SubAsync].append(data.SubAsync).fist()
+	if sub_sync != "" && is_async {
+		res.NameFunc = res.NameFunc + sub_sync
+	}
 	res.Client, _ = res.Comments_anotation[Annotation_Client].append(data.Client).fist()
 	res.Server, _ = res.Comments_anotation[Annotation_Server].append(data.Server).fist()
 	res.Module, _ = res.Comments_anotation[Annotation_Module].append(data.Module).fist()
-	res.ReqAppend, _ = res.Comments_anotation[Annotation_ReqOption].append(data.Req_Option).fist()
+	res.ReqAppend, _ = res.Comments_anotation[Annotation_ReqOption].append(data.Req_Append).fist()
 	res.CallOptionName, _ = res.Comments_anotation[Annotation_CallOptionName].append(data.Call_Option_Name).fist()
 	// 获取返回值信息
 	for index, result := range funcSpec.Type.Results.List {
@@ -483,6 +522,17 @@ func handleFuncDecl(funcSpec *ast.FuncDecl) (res *func_decl) {
 			res.CallRetName = res.RetFirst.Name
 		}
 	}
+	if !res.IsAsync {
+		res.Return = res.Out
+	} else {
+		v := &func_param_in_or_out{
+			Name:           "call",
+			Type:           "*crpc.Call",
+			Type_elem_init: "",
+		}
+		v.fixFullTypeName()
+		res.Return = []*func_param_in_or_out{v}
+	}
 
 	// 获取参数信息
 	if funcSpec.Type.Params != nil {
@@ -506,6 +556,7 @@ func handleFuncDecl(funcSpec *ast.FuncDecl) (res *func_decl) {
 	}
 
 	if req_append := res.ReqAppend; req_append != "" {
+		req_append := strings.Trim(req_append, "\"")
 		parts := strings.Split(req_append, ",")
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
