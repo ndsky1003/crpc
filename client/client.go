@@ -10,12 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/net/client"
 )
 
-type CrpcClient struct {
-	netClient  *client.Client
+type Client struct {
+	client     *client.Client
+	version    uuid.UUID
 	name       string
 	weight     int
 	seq        uint64
@@ -44,10 +46,16 @@ type methodType struct {
 	ReplyType reflect.Type
 }
 
-func New(ctx context.Context, name, addr string, weight int) (*CrpcClient, error) {
-	c := &CrpcClient{
-		name:   name,
-		weight: weight,
+func New(ctx context.Context, name, addr string, weight int) (c *Client, err error) {
+	var version uuid.UUID
+	version, err = uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate uuid: %w", err)
+	}
+	c = &Client{
+		version: version,
+		name:    name,
+		weight:  weight,
 	}
 
 	// 使用 net/client 库
@@ -59,11 +67,11 @@ func New(ctx context.Context, name, addr string, weight int) (*CrpcClient, error
 	}
 
 	// 连接成功后自动发送 Verify
-	nc.GetOpt().SetOnConnected(func() {
-		c.sendVerify()
+	nc.GetOpt().SetOnConnected(func() error {
+		return c.sendVerify()
 	})
 
-	c.netClient = nc
+	c.client = nc
 	return c, nil
 }
 
@@ -73,7 +81,7 @@ type VerifyReq struct {
 	Weight      int
 }
 
-func (c *CrpcClient) sendVerify() {
+func (c *Client) sendVerify() error {
 	req := VerifyReq{
 		ServiceName: c.name,
 		Weight:      c.weight,
@@ -81,11 +89,11 @@ func (c *CrpcClient) sendVerify() {
 	body, _ := json.Marshal(req)
 	h := &protocol.CrpcHeader{Type: protocol.TypeVerify}
 	packet, _ := protocol.Pack(h, nil, body)
-	c.netClient.Send(context.Background(), packet)
+	c.client.Send(context.Background(), packet)
 }
 
 // HandleMsg 实现 net.Handler 接口
-func (c *CrpcClient) HandleMsg(data []byte) error {
+func (c *Client) HandleMsg(data []byte) error {
 	h, _, body, err := protocol.Unpack(data)
 	if err != nil {
 		return err
@@ -126,7 +134,7 @@ func (c *CrpcClient) HandleMsg(data []byte) error {
 	return nil
 }
 
-func (c *CrpcClient) handleRemoteCall(h *protocol.CrpcHeader, body []byte) {
+func (c *Client) handleRemoteCall(h *protocol.CrpcHeader, body []byte) {
 	// 查找本地服务
 	// 假设 h.Method 传的是 "Func" 名，且我们已通过 RegisterName 注册了服务
 	// 这里需要一套简单的协议约定，比如 h.Method = "MethodName"
@@ -174,7 +182,7 @@ func (c *CrpcClient) handleRemoteCall(h *protocol.CrpcHeader, body []byte) {
 	c.sendReply(h.Seq, string(respBody), nil)
 }
 
-func (c *CrpcClient) sendReply(seq uint64, bodyStr string, err error) {
+func (c *Client) sendReply(seq uint64, bodyStr string, err error) {
 	h := &protocol.CrpcHeader{
 		Seq:  seq,
 		Type: protocol.TypeReply,
@@ -184,12 +192,12 @@ func (c *CrpcClient) sendReply(seq uint64, bodyStr string, err error) {
 	}
 	// Body 这里的处理需要根据序列化协议统一
 	packet, _ := protocol.Pack(h, nil, []byte(bodyStr))
-	c.netClient.Send(context.Background(), packet)
+	c.client.Send(context.Background(), packet)
 }
 
 // --- 注册机制 (移植自 v2) ---
 
-func (c *CrpcClient) RegisterName(name string, rcvr any) error {
+func (c *Client) RegisterName(name string, rcvr any) error {
 	s := new(service)
 	s.typ = reflect.TypeOf(rcvr)
 	s.rcvr = reflect.ValueOf(rcvr)
@@ -215,7 +223,7 @@ func (c *CrpcClient) RegisterName(name string, rcvr any) error {
 
 // --- 统一调用入口 ---
 
-func (c *CrpcClient) Call(ctx context.Context, serviceName, method string, args, reply any, opts ...CallOption) error {
+func (c *Client) Call(ctx context.Context, serviceName, method string, args, reply any, opts ...CallOption) error {
 	options := &CallOptions{}
 	for _, o := range opts {
 		o(options)
@@ -252,7 +260,7 @@ func (c *CrpcClient) Call(ctx context.Context, serviceName, method string, args,
 		c.pending.Store(seq, call)
 	}
 
-	if err := c.netClient.Send(ctx, packet); err != nil {
+	if err := c.client.Send(ctx, packet); err != nil {
 		c.pending.Delete(seq)
 		return err
 	}
@@ -270,7 +278,7 @@ func (c *CrpcClient) Call(ctx context.Context, serviceName, method string, args,
 	}
 }
 
-func (c *CrpcClient) invokeLocal(serviceName, method string, args, reply any) error {
+func (c *Client) invokeLocal(serviceName, method string, args, reply any) error {
 	val, ok := c.serviceMap.Load(serviceName)
 	if !ok {
 		return fmt.Errorf("local service %s not found", serviceName)
