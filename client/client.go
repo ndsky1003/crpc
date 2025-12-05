@@ -10,16 +10,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/net/client"
+	"github.com/ndsky1003/net/conn"
 )
 
 type Client struct {
 	client     *client.Client
-	version    uuid.UUID
-	name       string
-	weight     int
+	version    uint32
+	opt        *Option
 	seq        uint64
 	pending    sync.Map // seq -> *Call
 	serviceMap sync.Map // map[string]*service (本地服务注册)
@@ -46,50 +46,50 @@ type methodType struct {
 	ReplyType reflect.Type
 }
 
-func New(ctx context.Context, name, addr string, weight int) (c *Client, err error) {
-	var version uuid.UUID
-	version, err = uuid.NewV7()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate uuid: %w", err)
+func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err error) {
+	opt := Options().
+		SetWeight(10).
+		Merge(opts...)
+	if opt.Name == nil {
+		return nil, errors.New("service name is required")
+	}
+	if addr == "" {
+		return nil, errors.New("address is required")
 	}
 	c = &Client{
-		version: version,
-		name:    name,
-		weight:  weight,
+		version: uint32(time.Now().Unix()),
+		opt:     opt,
 	}
 
-	// 使用 net/client 库
-	nc, err := client.Dial(ctx, name, addr,
-		client.Options().SetHandler(c).SetReconnectInterval(time.Second),
-	)
+	nc, err := client.Dial(ctx, *opt.Name, addr, client.Options().SetHandler(c))
 	if err != nil {
 		return nil, err
 	}
 
 	// 连接成功后自动发送 Verify
-	nc.GetOpt().SetOnConnected(func() error {
-		return c.sendVerify()
-	})
+	nc.GetOpt().SetOnConnected(c.onConnected)
 
 	c.client = nc
 	return c, nil
 }
 
-// 握手包定义 (需与 Server 端一致)
-type VerifyReq struct {
-	ServiceName string
-	Weight      int
-}
-
-func (c *Client) sendVerify() error {
-	req := VerifyReq{
-		ServiceName: c.name,
-		Weight:      c.weight,
+// onconnect
+func (this *Client) onConnected(c *conn.Conn) error {
+	req := &protocol.VerifyReq{
+		Name:   *this.opt.Name,
+		Weight: *this.opt.Weight,
 	}
-	body, _ := json.Marshal(req)
-	h := &protocol.CrpcHeader{Type: protocol.TypeVerify}
-	packet, _ := protocol.Pack(h, nil, body)
-	c.client.Send(context.Background(), packet)
+	body, r, err := coder.Marshal(coder.Msgp, req)
+	defer r()
+	if err != nil {
+		return err
+	}
+	h := &protocol.Header{Type: protocol.TypeVerify}
+	packet, err := protocol.Pack(h, nil, body)
+	if err := c.Write(packet); err != nil {
+		return err
+	}
+	return c.Flush()
 }
 
 // HandleMsg 实现 net.Handler 接口
@@ -134,7 +134,7 @@ func (c *Client) HandleMsg(data []byte) error {
 	return nil
 }
 
-func (c *Client) handleRemoteCall(h *protocol.CrpcHeader, body []byte) {
+func (c *Client) handleRemoteCall(h *protocol.Header, body []byte) {
 	// 查找本地服务
 	// 假设 h.Method 传的是 "Func" 名，且我们已通过 RegisterName 注册了服务
 	// 这里需要一套简单的协议约定，比如 h.Method = "MethodName"
@@ -183,7 +183,7 @@ func (c *Client) handleRemoteCall(h *protocol.CrpcHeader, body []byte) {
 }
 
 func (c *Client) sendReply(seq uint64, bodyStr string, err error) {
-	h := &protocol.CrpcHeader{
+	h := &protocol.Header{
 		Seq:  seq,
 		Type: protocol.TypeReply,
 	}
@@ -236,7 +236,7 @@ func (c *Client) Call(ctx context.Context, serviceName, method string, args, rep
 
 	// 2. 远程网络调用
 	seq := atomic.AddUint64(&c.seq, 1)
-	h := &protocol.CrpcHeader{
+	h := &protocol.Header{
 		Seq:         seq,
 		Type:        protocol.TypeCall,
 		ServiceName: serviceName,

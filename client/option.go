@@ -1,22 +1,41 @@
 package client
 
-type CallOptions struct {
-	TargetSid string
-	Broadcast bool
+func Options() *Option {
+	return &Option{}
 }
 
-type CallOption func(*CallOptions)
-
-// WithTargetSid 指定调用 (需求 4)
-func WithTargetSid(sid string) CallOption {
-	return func(o *CallOptions) {
-		o.TargetSid = sid
-	}
+type Option struct {
+	Name   *string
+	Weight *int
 }
 
-// WithBroadcast 广播调用 (需求 4)
-func WithBroadcast() CallOption {
-	return func(o *CallOptions) {
-		o.Broadcast = true
+func (o *Option) SetName(name string) *Option {
+	o.Name = &name
+	return o
+}
+
+func (o *Option) SetWeight(weight int) *Option {
+	o.Weight = &weight
+	return o
+}
+
+// 自动生成merge方法
+func (o *Option) merge(other *Option) *Option {
+	if other == nil {
+		return o
 	}
+	if other.Name != nil {
+		o.Name = other.Name
+	}
+	if other.Weight != nil {
+		o.Weight = other.Weight
+	}
+	return o
+}
+
+func (o *Option) Merge(opts ...*Option) *Option {
+	for _, opt := range opts {
+		o.merge(opt)
+	}
+	return o
 }

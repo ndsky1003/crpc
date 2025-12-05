@@ -1,8 +1,10 @@
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/ndsky1003/net v0.0.0-20251205083053-89e282fd956a h1:KVsiINmATSAzfWHua5eU+8eZbar/gB0V2mZzAtlfQB0=
-github.com/ndsky1003/net v0.0.0-20251205083053-89e282fd956a/go.mod h1:PdJlj7QZX+e7s5Ig4Zw4Km/+3+yd6H8KTPVsIP8FEY8=
-github.com/ndsky1003/net v0.0.0-20251205094338-322695f3d7be h1:I6vbANbNkB0vI+G0e1JSCQBJwwpMbnK1gH8Wn97eHYU=
-github.com/ndsky1003/net v0.0.0-20251205094338-322695f3d7be/go.mod h1:PdJlj7QZX+e7s5Ig4Zw4Km/+3+yd6H8KTPVsIP8FEY8=
-github.com/ndsky1003/net v0.0.0-20251205095351-a205d45c878f h1:dVIsvgwXnOq0T/wdMnXka+Rm+5U2WvB21mG7SCmwGMc=
-github.com/ndsky1003/net v0.0.0-20251205095351-a205d45c878f/go.mod h1:PdJlj7QZX+e7s5Ig4Zw4Km/+3+yd6H8KTPVsIP8FEY8=
+github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=
+github.com/philhofer/fwd v1.2.0/go.mod h1:RqIHx9QI14HlwKwm98g9Re5prTQ6LdeRQn+gXJFxsJM=
+github.com/tinylib/msgp v1.6.1 h1:ESRv8eL3u+DNHUoSAAQRE50Hm162zqAnBoGv9PzScPY=
+github.com/tinylib/msgp v1.6.1/go.mod h1:RSp0LW9oSxFut3KzESt5Voq4GVWyS+PSulT77roAqEA=
+github.com/vmihailenco/msgpack/v5 v5.4.1 h1:cQriyiUvjTwOHg8QZaPihLWeRAAVoCpE00IUPn0Bjt8=
+github.com/vmihailenco/msgpack/v5 v5.4.1/go.mod h1:GaZTsDaehaPpQVyxrf5mtQlH+pc21PIudVV/E3rRQok=
+github.com/vmihailenco/tagparser/v2 v2.0.0 h1:y09buUbR+b5aycVFQs/g70pqKVZNBmxwAhO7/IwNM9g=
+github.com/vmihailenco/tagparser/v2 v2.0.0/go.mod h1:Wri+At7QHww0WTrCBeu4J6bNtoV6mEfg5OIWRZA9qds=

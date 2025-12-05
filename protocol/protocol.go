@@ -5,32 +5,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+
+	"github.com/ndsky1003/crpc/v3/protocol/header"
 )
-
-// CallType 定义调用类型
-type CallType byte
-
-const (
-	TypeVerify    CallType = 1 // 握手/鉴权
-	TypeCall      CallType = 2 // 普通请求
-	TypeReply     CallType = 3 // 响应
-	TypeBroadcast CallType = 4 // 广播
-)
-
-// CrpcHeader 协议头
-type CrpcHeader struct {
-	Seq         uint64
-	Type        CallType
-	ServiceName string // 目标服务名
-	Method      string // 方法名
-	TargetSid   string // 指定目标的 SID (为空则负载均衡)
-	Error       string // 错误信息 (仅 Reply 用)
-	MetaLen     uint32
-	BodyLen     uint32
-}
 
 // Pack 打包消息: HeaderLen(2) + Header + Meta + Body
-func Pack(h *CrpcHeader, meta []byte, body []byte) ([]byte, error) {
+func Pack(h *header.Header, meta []byte, body []byte) ([]byte, error) {
 	h.MetaLen = uint32(len(meta))
 	h.BodyLen = uint32(len(body))
 
@@ -65,7 +45,7 @@ func Pack(h *CrpcHeader, meta []byte, body []byte) ([]byte, error) {
 }
 
 // Unpack 解包
-func Unpack(data []byte) (*CrpcHeader, []byte, []byte, error) {
+func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
 	if len(data) < 2 {
 		return nil, nil, nil, errors.New("packet too short")
 	}
@@ -75,7 +55,7 @@ func Unpack(data []byte) (*CrpcHeader, []byte, []byte, error) {
 		return nil, nil, nil, errors.New("header incomplete")
 	}
 
-	h := &CrpcHeader{}
+	h := &header.Header{}
 	r := bytes.NewReader(data[2 : 2+headLen])
 	binary.Read(r, binary.BigEndian, &h.Seq)
 	binary.Read(r, binary.BigEndian, &h.Type)
