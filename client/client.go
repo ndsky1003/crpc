@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -12,11 +13,15 @@ import (
 
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/protocol"
+	"github.com/ndsky1003/crpc/v3/protocol/header"
+	"github.com/ndsky1003/crpc/v3/protocol/header/headerstatus"
+	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
 	"github.com/ndsky1003/net/client"
 	"github.com/ndsky1003/net/conn"
 )
 
 type Client struct {
+	Name       string
 	client     *client.Client
 	version    uint32
 	opt        *Option
@@ -32,20 +37,6 @@ type Call struct {
 	Done  chan *Call
 }
 
-// service 用于本地反射调用
-type service struct {
-	name    string
-	rcvr    reflect.Value
-	typ     reflect.Type
-	methods map[string]*methodType
-}
-
-type methodType struct {
-	method    reflect.Method
-	ArgType   reflect.Type
-	ReplyType reflect.Type
-}
-
 func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err error) {
 	opt := Options().
 		SetWeight(10).
@@ -58,16 +49,16 @@ func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err erro
 	}
 	c = &Client{
 		version: uint32(time.Now().Unix()),
+		Name:    *opt.Name,
 		opt:     opt,
 	}
 
-	nc, err := client.Dial(ctx, *opt.Name, addr, client.Options().SetHandler(c))
+	nc, err := client.Dial(ctx, *opt.Name, addr, client.Options().
+		SetHandler(c).
+		SetOnConnected(c.onConnected))
 	if err != nil {
 		return nil, err
 	}
-
-	// 连接成功后自动发送 Verify
-	nc.GetOpt().SetOnConnected(c.onConnected)
 
 	c.client = nc
 	return c, nil
@@ -79,28 +70,61 @@ func (this *Client) onConnected(c *conn.Conn) error {
 		Name:   *this.opt.Name,
 		Weight: *this.opt.Weight,
 	}
-	body, r, err := coder.Marshal(coder.Msgp, req)
-	defer r()
+	body, err := coder.Marshal(coder.Msgp, req)
 	if err != nil {
 		return err
 	}
-	h := &protocol.Header{Type: protocol.TypeVerify}
-	packet, err := protocol.Pack(h, nil, body)
-	if err := c.Write(packet); err != nil {
+	h := header.Get().SetType(headertype.VerifyReq)
+	packets, err := protocol.Pack(h, nil, body)
+	if err != nil {
+		h.Release()
 		return err
 	}
-	return c.Flush()
+	if err := c.Writes(packets); err != nil {
+		h.Release()
+		return err
+	}
+	if err := c.Flush(); err != nil {
+		h.Release()
+		return err
+	}
+	h.Release()
+
+	// 等待验证响应
+	respData, err := c.Read()
+	if err != nil {
+		return err
+	}
+	res_h, _, resBody, err := protocol.Unpack(respData)
+	if err != nil {
+		return err
+	}
+	defer res_h.Release()
+
+	if res_h.Status == headerstatus.Success {
+		return nil
+	}
+
+	var resp protocol.VerifyRes
+	if err := coder.Unmarshal(coder.Msgp, resBody, &resp); err != nil {
+		return err
+	}
+	return fmt.Errorf("verification failed: %s", resp.Message)
+
 }
 
 // HandleMsg 实现 net.Handler 接口
 func (c *Client) HandleMsg(data []byte) error {
-	h, _, body, err := protocol.Unpack(data)
+	h, meta, body, err := protocol.Unpack(data)
 	if err != nil {
 		return err
 	}
+	if h.Version != c.version {
+		return fmt.Errorf("version mismatch: got %d, want %d", h.Version, c.version)
+	}
 
 	// 1. 如果是 Reply 类型 (我发出去的请求回来了)
-	if h.Type == protocol.TypeReply {
+	if h.Type.IsRes() {
 		val, ok := c.pending.LoadAndDelete(h.Seq)
 		if !ok {
 			return nil // 可能已超时或被移除
@@ -122,126 +146,107 @@ func (c *Client) HandleMsg(data []byte) error {
 	}
 
 	// 2. 如果是 Call/Broadcast 类型 (别人调我)
-	if h.Type == protocol.TypeCall || h.Type == protocol.TypeBroadcast {
-		// 路由到本地 invokeLocal
-		// 这里的 h.Method 应该是 "Struct.Method" 格式
-		// h.ServiceName 应该是 "MyService"
-		// 这里的 body 是 args
-		go c.handleRemoteCall(h, body)
+	if h.Type.IsReq() {
+		return c.handleRemoteCall(h, meta, body)
+	}
+
+	return nil
+}
+
+func (c *Client) sendReply(h *header.Header, res any, err error) {
+	defer h.Release()
+	from := h.FromService
+	to := h.ToService
+	req_type := h.Type
+	var res_type headertype.T
+	switch req_type {
+	case headertype.Req:
+		res_type = headertype.Res
+	case headertype.BroadcastReq:
+		res_type = headertype.BroadcastRes
+	default:
+		log.Println("unknown request type:", req_type)
+		return
+	}
+	h.SetFromService(to).SetToService(from).SetType(res_type)
+	if err != nil {
+		h.SetStatus(headerstatus.Failed).SetResCoderT(coder.Msgp)
+		var rpcErr *protocol.Error
+		if e, ok := err.(*protocol.Error); ok {
+			rpcErr = e
+		} else {
+			rpcErr = protocol.NewError(500, err.Error())
+		}
+		body, err := coder.Marshal(coder.Msgp, rpcErr)
+		if err != nil {
+			log.Println("marshal error:", err)
+		}
+		data, err := protocol.Pack(h, nil, body)
+		if err != nil {
+			log.Println("pack error:", err)
+		}
+		if sendErr := c.SendPacket(context.Background(), data); sendErr != nil {
+			log.Println("send error:", sendErr)
+		}
+		return
+	}
+	h.SetStatus(headerstatus.StatusOK)
+	body, err := coder.Marshal(h.ResCoderT, res)
+	if err != nil {
+		log.Println("marshal error:", err)
+	}
+
+	data, packErr := protocol.Pack(h, nil, []byte(body))
+	if packErr != nil {
+		log.Println("pack error:", packErr)
+	}
+
+	if sendErr := c.SendPacket(context.Background(), data); sendErr != nil {
+		log.Println("send error:", sendErr)
+	}
+}
+
+func (c *Client) handleRemoteCall(h *header.Header, meta, body []byte) error {
+	module, ok := c.serviceMap.Load(h.Module)
+	if !ok {
+		go c.sendReply(h, nil, errors.New("module not found locally"))
 		return nil
 	}
-
+	if handler, ok := module.(client_handler); ok {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			resp, err := handler.HandleMsg(h, meta, body, &wg)
+			c.sendReply(h, resp, err)
+		}()
+		wg.Wait()
+		return nil
+	} else {
+		go c.sendReply(h, nil, errors.New("module does not implement client_handler"))
+	}
 	return nil
 }
 
-func (c *Client) handleRemoteCall(h *protocol.Header, body []byte) {
-	// 查找本地服务
-	// 假设 h.Method 传的是 "Func" 名，且我们已通过 RegisterName 注册了服务
-	// 这里需要一套简单的协议约定，比如 h.Method = "MethodName"
-	// 而 h.ServiceName 用来匹配 c.serviceMap 中的 key
-
-	val, ok := c.serviceMap.Load(h.ServiceName)
-	if !ok {
-		c.sendReply(h.Seq, "", errors.New("service not found locally"))
-		return
-	}
-	svc := val.(*service)
-	mtype, ok := svc.methods[h.Method]
-	if !ok {
-		c.sendReply(h.Seq, "", errors.New("method not found locally"))
-		return
-	}
-
-	// 反序列化参数
-	argVal := reflect.New(mtype.ArgType.Elem())
-	if err := json.Unmarshal(body, argVal.Interface()); err != nil {
-		c.sendReply(h.Seq, "", fmt.Errorf("arg unmarshal error: %v", err))
-		return
-	}
-
-	// 构造返回值
-	replyVal := reflect.New(mtype.ReplyType.Elem())
-
-	// 调用
-	function := mtype.method.Func
-	in := []reflect.Value{svc.rcvr, argVal, replyVal}
-	ret := function.Call(in)
-
-	// 检查 error
-	if errInter := ret[0].Interface(); errInter != nil {
-		c.sendReply(h.Seq, "", errInter.(error))
-		return
-	}
-
-	// 成功，发送响应 (Broadcast 通常不回包，或者根据业务需求)
-	if h.Type == protocol.TypeBroadcast {
-		return
-	}
-
-	respBody, _ := json.Marshal(replyVal.Interface())
-	c.sendReply(h.Seq, string(respBody), nil)
-}
-
-func (c *Client) sendReply(seq uint64, bodyStr string, err error) {
-	h := &protocol.Header{
-		Seq:  seq,
-		Type: protocol.TypeReply,
-	}
-	if err != nil {
-		h.Error = err.Error()
-	}
-	// Body 这里的处理需要根据序列化协议统一
-	packet, _ := protocol.Pack(h, nil, []byte(bodyStr))
-	c.client.Send(context.Background(), packet)
-}
-
-// --- 注册机制 (移植自 v2) ---
-
-func (c *Client) RegisterName(name string, rcvr any) error {
-	s := new(service)
-	s.typ = reflect.TypeOf(rcvr)
-	s.rcvr = reflect.ValueOf(rcvr)
-	s.name = name
-	s.methods = make(map[string]*methodType)
-
-	for m := 0; m < s.typ.NumMethod(); m++ {
-		method := s.typ.Method(m)
-		mtype := method.Type
-		// 假设格式: func (t *T) Method(args *Args, reply *Reply) error
-		if mtype.NumIn() != 3 || mtype.NumOut() != 1 {
-			continue
-		}
-		s.methods[method.Name] = &methodType{
-			method:    method,
-			ArgType:   mtype.In(1),
-			ReplyType: mtype.In(2),
-		}
-	}
-	c.serviceMap.Store(name, s)
-	return nil
+func (c *Client) SendPacket(ctx context.Context, data [][]byte) error {
+	return c.client.Sends(ctx, data)
 }
 
 // --- 统一调用入口 ---
-
-func (c *Client) Call(ctx context.Context, serviceName, method string, args, reply any, opts ...CallOption) error {
-	options := &CallOptions{}
-	for _, o := range opts {
-		o(options)
-	}
-
+func (c *Client) Call(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
+	// opt := Options().Merge(c.opt).Merge(opts...)
 	// 1. 本地调用拦截 (需求 4)
-	if serviceName == c.name {
+	if serviceName == c.Name {
 		return c.invokeLocal(serviceName, method, args, reply)
 	}
 
 	// 2. 远程网络调用
 	seq := atomic.AddUint64(&c.seq, 1)
-	h := &protocol.Header{
-		Seq:         seq,
-		Type:        protocol.TypeCall,
-		ServiceName: serviceName,
-		Method:      method,
-		TargetSid:   options.TargetSid,
+	h := &header.Header{
+		Seq:       seq,
+		Type:      protocol.TypeCall,
+		ToService: serviceName,
+		Method:    method,
+		TargetSid: options.TargetSid,
 	}
 	if options.Broadcast {
 		h.Type = protocol.TypeBroadcast

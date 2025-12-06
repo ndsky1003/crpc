@@ -5,9 +5,7 @@ import (
 )
 
 type Coder interface {
-	//NOTE: the release_func is used to release resources after using the marshaled data,
-	// 有可能是nil，因为data底层共用,如果copy了,再拿出来就会浪费性能
-	Marshal(any) ([]byte, func(), error)
+	Marshal(any) ([]byte, error)
 	Unmarshal([]byte, any) error
 }
 
@@ -40,16 +38,16 @@ var coders = map[T]Coder{
 	Msgp: new_msgp_coder(),
 }
 
-func Marshal(t T, v any) (data []byte, release_func func(), err error) {
+// NOTE: 这里放弃了zero-copy设计，因为涉及了有sendChan,这种架构下zero-copy不现实,所以返回的data，必须是新分配的内存
+// 极致修复,就是使用RingBuffer的架构,就可以做到zero-copy
+// 参考: gnet, evio, nbio
+func Marshal(t T, v any) (data []byte, err error) {
 	coder, ok := coders[t]
 	if !ok {
 		err = fmt.Errorf("coder:%v is not exist", t)
 		return
 	}
-	data, release_func, err = coder.Marshal(v)
-	if release_func == nil {
-		release_func = func() {}
-	}
+	data, err = coder.Marshal(v)
 	if err != nil {
 		err = fmt.Errorf("coder:%v marshal err:%w", t, err)
 	}

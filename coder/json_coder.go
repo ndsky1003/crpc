@@ -11,9 +11,9 @@ func new_json_coder() *json_coder {
 	return new(json_coder)
 }
 
-func (this *json_coder) Marshal(v any) ([]byte, func(), error) {
+func (this *json_coder) Marshal(v any) ([]byte, error) {
 	data, err := json.Marshal(v)
-	return data, nil, err
+	return data, err
 }
 
 func (this *json_coder) Unmarshal(data []byte, v any) error {
