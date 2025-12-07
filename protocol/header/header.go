@@ -116,8 +116,8 @@ func (this *Header) SetBodyLen(s uint64) *Header {
 
 const (
 	uint_32_size = 4
-	uint_16_size = 2
-	uint_8_size  = 2
+	// uint_16_size = 2
+	uint_8_size = 2
 )
 
 // Marshal will encode request header into a byte slice

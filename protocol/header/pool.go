@@ -2,7 +2,7 @@ package header
 
 import "sync"
 
-var pool = sync.Pool{New: func() interface{} {
+var pool = sync.Pool{New: func() any {
 	return &Header{}
 }}
 

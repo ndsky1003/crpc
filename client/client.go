@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"reflect"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/protocol"
+	"github.com/ndsky1003/crpc/v3/protocol/errors"
 	"github.com/ndsky1003/crpc/v3/protocol/header"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headerstatus"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
@@ -21,6 +21,7 @@ import (
 )
 
 type Client struct {
+	id         int64
 	Name       string
 	client     *client.Client
 	version    uint32
@@ -42,15 +43,15 @@ func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err erro
 		SetWeight(10).
 		Merge(opts...)
 	if opt.Name == nil {
-		return nil, errors.New("service name is required")
+		return nil, errors.New(errors.ClientInvalidArgs, "service name is required")
 	}
 	if addr == "" {
-		return nil, errors.New("address is required")
+		return nil, errors.New(errors.ClientInvalidArgs, "address is required")
 	}
 	c = &Client{
 		version: uint32(time.Now().Unix()),
 		Name:    *opt.Name,
-		opt:     opt,
+		opt:     &opt,
 	}
 
 	nc, err := client.Dial(ctx, *opt.Name, addr, client.Options().
@@ -101,7 +102,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	}
 	defer res_h.Release()
 
-	if res_h.Status == headerstatus.Success {
+	if res_h.Status.IsOk() {
 		return nil
 	}
 

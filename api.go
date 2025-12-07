@@ -2,15 +2,15 @@ package crpc
 
 import (
 	"github.com/ndsky1003/crpc/v3/coder"
-	"github.com/ndsky1003/crpc/v3/protocol"
+	"github.com/ndsky1003/crpc/v3/protocol/errors"
 )
 
 func RegisterCoder(t coder.T, c coder.Coder) {
 	coder.RegisterCoder(t, c)
 }
 
-type Error = protocol.Error
+type Error = errors.Error
 
-func NewError(code int32, msg string) *Error {
-	return protocol.NewError(code, msg)
+func NewError(code uint16, msg string) *Error {
+	return errors.New(code, msg)
 }

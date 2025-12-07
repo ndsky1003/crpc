@@ -6,6 +6,7 @@ type T uint8
 const (
 	VerifyReq T = 1 << iota // 握手/鉴权
 	VerifyRes
+	Send         // 无返回值
 	Req          // 普通请求
 	Res          // 普通响应
 	BroadcastReq // 广播请求
@@ -25,10 +26,10 @@ func (this T) String() string {
 	return m[this]
 }
 
-var req_all = VerifyReq | Req | BroadcastReq
+var req_all = VerifyReq | Req | BroadcastReq | Send
 
 func (this T) IsReq() bool {
-	return this&Req != 0
+	return this&req_all != 0
 }
 
 func (this T) IsRes() bool {
