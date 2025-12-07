@@ -1,18 +1,34 @@
 package client
 
-import "github.com/ndsky1003/crpc/v3/comm/ut"
+import (
+	"time"
+
+	"github.com/ndsky1003/crpc/v3/comm/ut"
+)
 
 func Options() *Option {
 	return &Option{}
 }
 
 type Option struct {
-	Name   *string
-	Weight *int
+	Name            *string
+	Weight          *int
+	Secret          *string
+	VerifyJwtExpire *time.Duration
 }
 
 func (o *Option) SetName(name string) *Option {
 	o.Name = &name
+	return o
+}
+
+func (o *Option) SetSecret(secret string) *Option {
+	o.Secret = &secret
+	return o
+}
+
+func (o *Option) SetVerifyJwtExpire(t time.Duration) *Option {
+	o.VerifyJwtExpire = &t
 	return o
 }
 
@@ -28,6 +44,8 @@ func (o *Option) merge(other *Option) *Option {
 	}
 	ut.ResolveOption(&o.Name, other.Name)
 	ut.ResolveOption(&o.Weight, other.Weight)
+	ut.ResolveOption(&o.Secret, other.Secret)
+	ut.ResolveOption(&o.VerifyJwtExpire, other.VerifyJwtExpire)
 	return o
 }
 

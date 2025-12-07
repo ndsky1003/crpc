@@ -15,20 +15,20 @@ import (
 // +---------+----------+---------+---------+---------+------------+-------------------+-----------------+-------------------+-----------------+----------+----------+------------+----------+
 // |  uint32 |uint8|  uint8 | uint8  | uint8  | uint8  |   uint8   |  uvarint (1byte)+ string   | uvarint+ string | uvarint + string  | uvarint +string |  uvarint |  uvarint  |   uvarint  |  uint32  |
 type Header struct {
-	Version     uint32         //4
-	Type        headertype.T   //1
-	Status      headerstatus.T //1
-	MetaCoderT  coder.T        //1
-	ReqCoderT   coder.T        //1
-	ResCoderT   coder.T        //1
-	CompressT   compressor.T   //1
-	FromService string         //1 长度超过127就报错 ,实际上100就试上线
-	ToService   string         //1 同上
-	Module      string         //1 同上
-	Method      string         //1 同上
-	Seq         uint64         //10
-	MetaLen     uint64         //10
-	BodyLen     uint64         //10
+	Version         uint32         //4
+	Type            headertype.T   //1
+	Status          headerstatus.T //1
+	MetaCoderT      coder.T        //1
+	ReqCoderT       coder.T        //1
+	ResCoderT       coder.T        //1
+	CompressT       compressor.T   //1
+	FromServiceUUID string         //1 长度超过127就报错 ,实际上100就试上线
+	ToService       string         //1 同上
+	Module          string         //1 同上
+	Method          string         //1 同上
+	Seq             uint64         //10
+	MetaLen         uint64         //10
+	BodyLen         uint64         //10
 	// Checksum    uint32       //4 //tcp 层面已经有checksum了，这里可以不需要
 }
 
@@ -75,7 +75,7 @@ func (this *Header) SetCompressT(t compressor.T) *Header {
 }
 
 func (this *Header) SetFromService(s string) *Header {
-	this.FromService = s
+	this.FromServiceUUID = s
 	return this
 }
 
@@ -122,7 +122,7 @@ const (
 
 // Marshal will encode request header into a byte slice
 func (r *Header) Marshal() ([]byte, error) {
-	length := MaxHeaderSize + len(r.FromService) + len(r.ToService) + len(r.Module) + len(r.Method)
+	length := MaxHeaderSize + len(r.FromServiceUUID) + len(r.ToService) + len(r.Module) + len(r.Method)
 	if length > FrozeMaxHeaderSize {
 		return nil, fmt.Errorf("heaer size:%v, > FrozeMaxHeaderSize:%v", length, FrozeMaxHeaderSize)
 	}
@@ -150,7 +150,7 @@ func (r *Header) Marshal() ([]byte, error) {
 	header[idx+1] = uint8(r.CompressT)
 	idx += uint_8_size
 
-	idx += binary_write_string(header[idx:], r.FromService)
+	idx += binary_write_string(header[idx:], r.FromServiceUUID)
 
 	idx += binary_write_string(header[idx:], r.ToService)
 
@@ -203,7 +203,7 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 	r.CompressT = compressor.T(data[idx+1])
 	idx += uint_8_size
 
-	r.FromService, size = binary_read_string(data[idx:])
+	r.FromServiceUUID, size = binary_read_string(data[idx:])
 	idx += size
 
 	r.ToService, size = binary_read_string(data[idx:])
@@ -244,7 +244,7 @@ func (r *Header) reset() {
 	r.ReqCoderT = 0
 	r.ResCoderT = 0
 	r.CompressT = 0
-	r.FromService = ""
+	r.FromServiceUUID = ""
 	r.ToService = ""
 	r.Module = ""
 	r.Method = ""
