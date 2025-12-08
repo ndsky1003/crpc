@@ -13,10 +13,14 @@ type msg_game struct{}
 
 type PlayerInfoReq struct {
 }
+
+type Meta struct {
+}
+
 type PlayerInfoRes struct {
 }
 
-func (*msg_game) PlayerInfo(req *PlayerInfoReq) (*PlayerInfoRes, error) {
+func (*msg_game) PlayerInfo(ctx context.Context, meta *Meta, req *PlayerInfoReq) (*PlayerInfoRes, error) {
 	return nil, nil
 }
 
@@ -25,14 +29,16 @@ func (c *msg_game) HandleMsg(ctx context.Context, method string, metaCoderT code
 	switch method {
 	case "PlayerInfo":
 		req := &PlayerInfoReq{}
-		err := coder.Unmarshal(reqCoderT, body, req)
-		if wg != nil {
+		meta := &Meta{}
+		if err := coder.Unmarshal(reqCoderT, body, req); err != nil {
 			wg.Done()
-		}
-		if err != nil {
 			return nil, err
 		}
-		return c.PlayerInfo(req)
+		if err := coder.Unmarshal(metaCoderT, body, meta); err != nil {
+			wg.Done()
+			return nil, err
+		}
+		return c.PlayerInfo(ctx, meta, req)
 	default:
 		if wg != nil {
 			wg.Done()

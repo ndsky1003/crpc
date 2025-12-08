@@ -190,7 +190,7 @@ func (c *Client) invoke_local_func(ctx context.Context, mod, method string, meta
 	}
 }
 
-func (c *Client) handleRes(ctx, h *header.Header, body []byte) error {
+func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) error {
 	defer h.Release()
 	seq := h.Seq
 
@@ -219,17 +219,26 @@ func (c *Client) handleRes(ctx, h *header.Header, body []byte) error {
 				shouldFinish = true
 			} else {
 				reply := call.BroadcaseResNewFunc()
+				var resErr error
+
+				// 2. 反序列化
 				if err := coder.Unmarshal(h.ResCoderT, body, reply); err != nil {
-					// 反序列化失败：视为严重错误，终止广播
-					call.Error = errors.New(errors.ClientInternal, err.Error())
+					resErr = errors.New(errors.ClientInternal, err.Error())
+					shouldFinish = true // 严重错误，中断流
+				}
+
+				select {
+				case call.broadcastCh <- broadcastResult{data: reply, err: resErr}:
+					// 写入成功
+				case <-call.ctx.Done():
+					// [安全保护] 消费者已死 (可能用户取消了，或者并发的其他 EOS 导致退出了)
+					// 此时直接丢弃消息，不阻塞，也不 panic
+					return nil
+				}
+
+				// 4. 处理 EOS (流结束)
+				if h.Flags.IsEOS() || shouldFinish {
 					shouldFinish = true
-				} else {
-					// 触发用户回调
-					cont := call.BroadcaseResCallBack(reply, nil)
-					// 只有当 (用户想继续) 且 (服务端没发EOS) 时，才继续保留
-					if !cont || h.Flags.IsEOS() {
-						shouldFinish = true
-					}
 				}
 			}
 		} else {
@@ -254,11 +263,15 @@ func (c *Client) handleRes(ctx, h *header.Header, body []byte) error {
 		}
 
 		if isBroadcast {
-			// 广播出错：通知用户，并询问是否继续（有些错误可能不致命？）
-			if call.BroadcaseResCallBack != nil {
-				// 传 nil reply, 传 error
-				cont := call.BroadcaseResCallBack(nil, call.Error)
-				if !cont || h.Flags.IsEOS() {
+			if call.broadcastCh != nil {
+
+				// 同样使用 select 安全写入错误
+				select {
+				case call.broadcastCh <- broadcastResult{data: nil, err: call.Error}:
+				case <-call.ctx.Done():
+					return nil
+				}
+				if h.Flags.IsEOS() {
 					shouldFinish = true
 				}
 			} else {
@@ -369,6 +382,16 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		}
 		call.BroadcaseResNewFunc = opt.BroadcastResNewFunc
 		call.BroadcaseResCallBack = opt.BroadcastResCallBack
+
+		// 1. 初始化缓冲通道 (大小根据业务压力调整，这里设为 64)
+		call.broadcastCh = make(chan broadcastResult, 64)
+		subCtx, cancel := context.WithCancel(ctx)
+		call.ctx = subCtx
+		call.cancel = cancel
+
+		// 2. 启动独立的消费协程
+		// 将 ctx 传入，以便在请求超时/取消时退出循环
+		go c.processBroadcastLoop(ctx, call)
 	}
 	seq := atomic.AddUint64(&c.seq, 1)
 	h := header.Get()
@@ -456,6 +479,35 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		c.pending.Store(seq, call)
 	}
 	return call
+}
+
+// [新增] 广播消费循环
+func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
+	// 保证退出时清理 pending (虽然 handleRes 也会清理，但双重保险)
+	// 同时也防止用户回调返回 false 后，pending map 中还有残留
+	defer func() {
+		c.pending.Delete(call.seq)
+		call.done()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// 上下文取消/超时，停止处理
+			return
+		case res, ok := <-call.broadcastCh:
+			if !ok {
+				// Channel 被 handleRes 关闭 (EOS)，说明流结束
+				return
+			}
+			// 执行用户回调 (此时是在独立协程中，不会阻塞网络层)
+			cont := call.BroadcaseResCallBack(res.data, res.err)
+			if !cont {
+				// 用户决定停止接收
+				return
+			}
+		}
+	}
 }
 
 func (c *Client) parseModuleFunc(raw string) (module, function string, err error) {

@@ -39,7 +39,7 @@ type Header struct {
 const (
 	// 固定部分的长度: 7个uint8
 	BaseFixedSize = 7
-	MaxStringLen  = 1024 // 限制单个字符串最大长度，防止恶意攻击
+	MaxStringLen  = 4 * 1024 // 限制单个字符串最大长度，防止恶意攻击
 )
 
 func (this *Header) SetType(t headertype.T) *Header {
