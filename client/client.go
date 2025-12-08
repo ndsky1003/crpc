@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -159,7 +160,14 @@ func (c *Client) HandleMsg(data []byte) error {
 	case h.Type.IsReq():
 		go c.handleReq(ctx, h, metaCopy, bodyCopy)
 	case h.Type.IsRes():
-		go c.handleRes(ctx, h, bodyCopy)
+		if h.Type == headertype.BroadcastRes {
+			if err := c.handleRes(ctx, h, bodyCopy); err != nil {
+				log.Println("handleRes :", err)
+			}
+		} else {
+			// 普通 RPC：不关心顺序，维持异步
+			go c.handleRes(ctx, h, bodyCopy)
+		}
 	default:
 		h.Release()
 		return fmt.Errorf("unknown header type: %d", h.Type)
@@ -207,80 +215,34 @@ func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) e
 	// 无论是 OK 还是 Error，如果是广播，流程都很像
 	isBroadcast := h.Type == headertype.BroadcastRes
 
-	if h.Code.IsOK() {
-		// --- 成功处理 ---
-		if isBroadcast {
-			// 广播成功
-			if call.BroadcaseResNewFunc == nil || call.BroadcaseResCallBack == nil {
-				// 配置错误：直接结束，不留后患
-				call.Error = errors.New(errors.ClientInternal, "broadcast callbacks missing")
-				shouldFinish = true
-			} else {
-				reply := call.BroadcaseResNewFunc()
-				var resErr error
-
-				// 2. 反序列化
-				if err := coder.Unmarshal(h.ResCoderT, body, reply); err != nil {
-					resErr = errors.New(errors.ClientInternal, err.Error())
-					shouldFinish = true // 严重错误，中断流
-				}
-
-				select {
-				case call.broadcastCh <- broadcastResult{data: reply, err: resErr}:
-					// 写入成功
-				case <-call.ctx.Done():
-					// [安全保护] 消费者已死 (可能用户取消了，或者并发的其他 EOS 导致退出了)
-					// 此时直接丢弃消息，不阻塞，也不 panic
-					return nil
-				}
-
-				// 4. 处理 EOS (流结束)
-				if h.Flags.IsEOS() || shouldFinish {
-					shouldFinish = true
-				}
-			}
-		} else {
-			// 普通 RPC 成功
+	if isBroadcast {
+		select {
+		case call.broadcastCh <- broadcastResult{rawBody: body, resCoderT: h.ResCoderT, code: h.Code}:
+		case <-call.ctx.Done():
+			// [安全保护] 消费者已死 (可能用户取消了，或者并发的其他 EOS 导致退出了)
+			// 此时直接丢弃消息，不阻塞，也不 panic
+			return nil
+		}
+		if h.Flags.IsEOS() {
+			shouldFinish = true
+		}
+	} else {
+		shouldFinish = true
+		if h.Code.IsOK() {
 			if call.Reply != nil {
 				if err := coder.Unmarshal(h.ResCoderT, body, call.Reply); err != nil {
 					call.Error = errors.New(errors.ClientInternal, err.Error())
 				}
 			}
-			shouldFinish = true
-		}
-	} else {
-		// --- 错误处理 ---
-		// 解析服务端传回的错误信息
-		var resErr errors.Error
-		// 3. 修正：传入指针 &resErr
-		if err := coder.Unmarshal(coder.Msgp, body, &resErr); err != nil {
-			// 如果连错误包都解不开，只好报内部错误
-			call.Error = errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
 		} else {
-			call.Error = &resErr
-		}
-
-		if isBroadcast {
-			if call.broadcastCh != nil {
-
-				// 同样使用 select 安全写入错误
-				select {
-				case call.broadcastCh <- broadcastResult{data: nil, err: call.Error}:
-				case <-call.ctx.Done():
-					return nil
-				}
-				if h.Flags.IsEOS() {
-					shouldFinish = true
-				}
+			var resErr errors.Error
+			if err := coder.Unmarshal(coder.Msgp, body, &resErr); err != nil {
+				call.Error = errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
 			} else {
-				shouldFinish = true
+				call.Error = &resErr
 			}
-		} else {
-			// 普通 RPC 出错：直接结束
-			shouldFinish = true
 		}
 	}
-
 	// 4. 统一收尾
 	if shouldFinish {
 		// 只有在真正结束时，才从 Map 中移除
@@ -496,8 +458,28 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 				// Channel 被 handleRes 关闭 (EOS)，说明流结束
 				return
 			}
-			// 执行用户回调 (此时是在独立协程中，不会阻塞网络层)
-			cont := call.BroadcaseResCallBack(res.data, res.err)
+			if call.BroadcaseResNewFunc == nil || call.BroadcaseResCallBack == nil {
+				// 安全保护，理论上不应该发生
+				return
+			}
+			var reply any
+			var resErr error
+			if res.code.IsOK() {
+				reply = call.BroadcaseResNewFunc()
+				if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
+					call.BroadcaseResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()))
+					return
+				}
+			} else {
+				resErr = &errors.Error{}
+				if err := coder.Unmarshal(coder.Msgp, res.rawBody, resErr); err != nil {
+					// 无法解析错误信息，构造一个通用错误
+					call.BroadcaseResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()))
+					return
+				}
+			}
+
+			cont := call.BroadcaseResCallBack(reply, resErr)
 			if !cont {
 				// 用户决定停止接收
 				return

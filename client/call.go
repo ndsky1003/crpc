@@ -3,11 +3,15 @@ package client
 import (
 	"context"
 	"sync/atomic"
+
+	"github.com/ndsky1003/crpc/v3/coder"
+	"github.com/ndsky1003/crpc/v3/protocol/header/headercode"
 )
 
 type broadcastResult struct {
-	data any
-	err  error
+	rawBody   []byte       // 原始数据
+	resCoderT coder.T      // 编码类型
+	code      headercode.T // 是否成功
 }
 
 type Call struct {
