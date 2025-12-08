@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,8 +15,8 @@ import (
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
 	"github.com/ndsky1003/crpc/v3/protocol/header"
+	"github.com/ndsky1003/crpc/v3/protocol/header/headercode"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headerflags"
-	"github.com/ndsky1003/crpc/v3/protocol/header/headerstatus"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
 	"github.com/ndsky1003/net/client"
 	"github.com/ndsky1003/net/conn"
@@ -135,7 +134,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 		this.UUID = resp.UUID
 		return nil
 	}
-	return errors.New(errors.ClientInternal, "verification failed: %s", resp.Message)
+	return errors.Newf(errors.ClientInternal, "verification failed: %s", resp.Message)
 }
 
 // HandleMsg 实现 net.Handler 接口
@@ -146,7 +145,14 @@ func (c *Client) HandleMsg(data []byte) error {
 	}
 	switch {
 	case h.Type.IsReq():
-		return c.handleReq(h, meta, body)
+		var wg sync.WaitGroup
+		var err error
+		wg.Add(1)
+		go func() {
+			err = c.handleReq(h, meta, body, &wg)
+		}()
+		wg.Wait()
+		return err
 	case h.Type.IsRes():
 		return c.handleRes(h, body)
 	default:
@@ -155,8 +161,27 @@ func (c *Client) HandleMsg(data []byte) error {
 	}
 }
 
-func (c *Client) handleReq(h *header.Header, meta, body []byte) error {
-	return c.handleRemoteCall(h, meta, body)
+func (c *Client) handleReq(h *header.Header, meta, body []byte, wg *sync.WaitGroup) error {
+	defer h.Release()
+	res, err := c.invoke_local_func(h.Module, h.Method, h.MetaCoderT, h.ReqCoderT, meta, body, wg)
+	return c.sendReply(h, res, err)
+}
+
+func (c *Client) invoke_local_func(mod, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (res any, err error) {
+	module, ok := c.serviceMap.Load(mod)
+	if !ok {
+		wg.Done()
+		err = errors.New(errors.RemoteInternal, "module not found locally")
+		return
+	}
+	if handler, ok := module.(client_handler); !ok {
+		wg.Done()
+		err = errors.New(errors.RemoteInternal, "module does not implement client_handler")
+		return
+	} else {
+		res, err = handler.HandleMsg(method, metaCoderT, reqCoderT, meta, body, wg)
+		return
+	}
 }
 
 func (c *Client) handleRes(h *header.Header, body []byte) error {
@@ -249,8 +274,7 @@ func (c *Client) handleRes(h *header.Header, body []byte) error {
 	return nil
 }
 
-func (c *Client) sendReply(h *header.Header, res any, err error) {
-	defer h.Release()
+func (c *Client) sendReply(h *header.Header, res any, err error) error {
 	req_type := h.Type
 	res_type := headertype.None
 	switch req_type {
@@ -259,12 +283,11 @@ func (c *Client) sendReply(h *header.Header, res any, err error) {
 	case headertype.BroadcastReq:
 		res_type = headertype.BroadcastRes
 	default:
-		log.Println("unknown request type:", req_type)
-		return
+		return errors.New(errors.ClientInternal, "unknown request type")
 	}
 	h.SetType(res_type)
 	if err != nil {
-		h.SetStatus(h.Status.SetOff(headerstatus.OK)).SetResCoderT(coder.Msgp)
+		h.SetCode(headercode.Failed).SetResCoderT(coder.Msgp)
 		var rpcErr *errors.Error
 		if e, ok := err.(*errors.Error); ok {
 			rpcErr = e
@@ -273,56 +296,37 @@ func (c *Client) sendReply(h *header.Header, res any, err error) {
 		}
 		body, err := coder.Marshal(coder.Msgp, rpcErr)
 		if err != nil {
-			log.Println("marshal error:", err)
-			return
+			return errors.New(errors.ClientInternal, err.Error())
 		}
 		data, err := protocol.Pack(h, nil, body)
 		if err != nil {
-			log.Println("pack error:", err)
-			return
+			return errors.New(errors.ClientInternal, err.Error())
 		}
-		if sendErr := c.SendPacket(context.Background(), data); sendErr != nil {
-			log.Println("send error:", sendErr)
+		if err := c.sendPacket(context.Background(), data); err != nil {
+			return errors.New(errors.ClientInternal, err.Error())
 		}
-		return
+		return nil
 	}
-	h.SetStatus(h.Status.SetOn(headerstatus.OK))
+	h.SetCode(headercode.OK)
 	body, err := coder.Marshal(h.ResCoderT, res)
 	if err != nil {
-		log.Println("marshal error:", err)
-		return
+		return err
 	}
 
 	data, packErr := protocol.Pack(h, nil, []byte(body))
 	if packErr != nil {
-		log.Println("pack error:", packErr)
-		return
+		return err
 	}
 
-	if sendErr := c.SendPacket(context.Background(), data); sendErr != nil {
-		log.Println("send error:", sendErr)
-	}
-}
-
-func (c *Client) handleRemoteCall(h *header.Header, meta, body []byte) error {
-	module, ok := c.serviceMap.Load(h.Module)
-	if !ok {
-		go c.sendReply(h, nil, errors.New(errors.RemoteInternal, "module not found locally"))
-		return nil
-	}
-	if handler, ok := module.(client_handler); ok {
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			resp, err := handler.HandleMsg(h, meta, body, &wg)
-			c.sendReply(h, resp, err)
-		}()
-		wg.Wait()
-		return nil
-	} else {
-		go c.sendReply(h, nil, errors.New(errors.RemoteInternal, "module does not implement client_handler"))
+	if err := c.sendPacket(context.Background(), data); err != nil {
+		return errors.New(errors.ClientInternal, err.Error())
 	}
 	return nil
+}
+
+func (c *Client) sendPacket(ctx context.Context, packet [][]byte, opts ...*Option) error {
+	opt := c.opt.Merge(opts...)
+	return c.client.Sends(ctx, packet, &opt.Option)
 }
 
 func (c *Client) Broadcast(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
@@ -356,6 +360,8 @@ func (c *Client) Call(ctx context.Context, serviceName, method string, args, rep
 		return call.Error
 	}
 }
+
+// WARNING: 需要自行释放call
 func (c *Client) Go(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) (call *call_) {
 	return c._go(ctx, headertype.Req, serviceName, method, args, reply, opts...)
 }
@@ -408,6 +414,10 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		SetModule(module).
 		SetMethod(method).
 		SetSeq(seq)
+	isLocalCall := (c.Name == serviceName) && (ht == headertype.Req)
+	metaT := *opt.MetaCoderT
+	reqT := *opt.ReqCoderT
+	resT := *opt.ResCoderT
 
 	if *opt.Debug {
 		h.Flags.With(headerflags.Debug)
@@ -444,6 +454,31 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 	call.seq = seq
 	call.Reply = reply
 
+	if isLocalCall {
+
+		go func() {
+			var dummyWg sync.WaitGroup
+			dummyWg.Add(1)
+			res, err := c.invoke_local_func(module, method, metaT, reqT, metaBytes, bodyBytes, &dummyWg)
+
+			if err != nil {
+				call.Error = err
+			} else if call.Reply != nil {
+				data, err := coder.Marshal(resT, res)
+				if err != nil {
+					call.Error = errors.New(errors.ClientInternal, err.Error())
+				} else {
+					if err := coder.Unmarshal(resT, data, call.Reply); err != nil {
+						call.Error = errors.New(errors.ClientInternal, err.Error())
+					}
+				}
+			}
+			call.done()
+		}()
+
+		return call
+	}
+
 	if err := c.client.Sends(ctx, packet, &opt.Option); err != nil {
 		call.Error = errors.New(errors.ClientInternal, err.Error())
 		call.done()
@@ -454,31 +489,6 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 	}
 	return call
 }
-
-// func (c *Client) invokeLocal(serviceName, method string, args, reply any) error {
-// 	val, ok := c.serviceMap.Load(serviceName)
-// 	if !ok {
-// 		return fmt.Errorf("local service %s not found", serviceName)
-// 	}
-// 	svc := val.(*service)
-// 	m, ok := svc.methods[method]
-// 	if !ok {
-// 		return fmt.Errorf("local method %s not found", method)
-// 	}
-//
-// 	// 直接反射调用，不进行序列化
-// 	fn := m.method.Func
-// 	ret := fn.Call([]reflect.Value{
-// 		svc.rcvr,
-// 		reflect.ValueOf(args),
-// 		reflect.ValueOf(reply),
-// 	})
-//
-// 	if errInter := ret[0].Interface(); errInter != nil {
-// 		return errInter.(error)
-// 	}
-// 	return nil
-// }
 
 func (c *Client) parseModuleFunc(raw string) (module, function string, err error) {
 	if raw == "" {

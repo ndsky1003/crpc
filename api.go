@@ -11,6 +11,10 @@ func RegisterCoder(t coder.T, c coder.Coder) {
 
 type Error = errors.Error
 
-func NewError(code uint16, msg string, args ...any) *Error {
-	return errors.New(code, msg, args...)
+func NewError(code uint16, msg string) *Error {
+	return errors.New(code, msg)
+}
+
+func NewErrorf(code uint16, msg string, args ...any) *Error {
+	return errors.Newf(code, msg, args...)
 }

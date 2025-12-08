@@ -1,3 +1,4 @@
+// 这里是伪代码,用于代码生成示例
 package client
 
 import (
@@ -5,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/ndsky1003/crpc/v3/coder"
-	"github.com/ndsky1003/crpc/v3/protocol/header"
 )
 
 type msg_game struct{}
@@ -20,15 +20,22 @@ func (*msg_game) PlayerInfo(req *PlayerInfoReq) (*PlayerInfoRes, error) {
 }
 
 // code_gen
-func (c *msg_game) HandleMsg(header *header.Header, meta, body []byte, wg *sync.WaitGroup) (any, error) {
-	switch header.Method {
+func (c *msg_game) HandleMsg(method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (any, error) {
+	switch method {
 	case "PlayerInfo":
 		req := &PlayerInfoReq{}
-		coder.Unmarshal(header.ReqCoderT, body, req)
-		wg.Done()
+		err := coder.Unmarshal(reqCoderT, body, req)
+		if wg != nil {
+			wg.Done()
+		}
+		if err != nil {
+			return nil, err
+		}
 		return c.PlayerInfo(req)
 	default:
-		wg.Done()
+		if wg != nil {
+			wg.Done()
+		}
 		return nil, errors.New("unknown method")
 	}
 }

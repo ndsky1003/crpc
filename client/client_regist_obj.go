@@ -4,11 +4,12 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/ndsky1003/crpc/v3/protocol/header"
+	"github.com/ndsky1003/crpc/v3/coder"
 )
 
 type client_handler interface {
-	HandleMsg(header *header.Header, meta, body []byte, wg *sync.WaitGroup) (any, error)
+	//WARN: code_gen ,wg 可能为nil,用于等待释放meta与body buffer
+	HandleMsg(method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (any, error)
 }
 
 func (this *Client) Register(rcvr client_handler) error {

@@ -33,9 +33,10 @@ func (e *Error) WithTraceID(traceID string) *Error {
 }
 
 // 辅助构造函数
-func New(code T, msg string, args ...any) *Error {
-	if len(args) == 0 {
-		return &Error{Code: code, Msg: msg}
-	}
+func New(code T, msg string) *Error {
+	return &Error{Code: code, Msg: msg}
+}
+
+func Newf(code T, msg string, args ...any) *Error {
 	return &Error{Code: code, Msg: fmt.Sprintf(msg, args...)}
 }
