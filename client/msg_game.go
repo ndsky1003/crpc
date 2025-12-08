@@ -4,7 +4,6 @@ package client
 import (
 	"context"
 	"errors"
-	"sync"
 
 	"github.com/ndsky1003/crpc/v3/coder"
 )
@@ -25,24 +24,19 @@ func (*msg_game) PlayerInfo(ctx context.Context, meta *Meta, req *PlayerInfoReq)
 }
 
 // code_gen
-func (c *msg_game) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (any, error) {
+func (c *msg_game) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte) (any, error) {
 	switch method {
 	case "PlayerInfo":
 		req := &PlayerInfoReq{}
 		meta := &Meta{}
 		if err := coder.Unmarshal(reqCoderT, body, req); err != nil {
-			wg.Done()
 			return nil, err
 		}
 		if err := coder.Unmarshal(metaCoderT, body, meta); err != nil {
-			wg.Done()
 			return nil, err
 		}
 		return c.PlayerInfo(ctx, meta, req)
 	default:
-		if wg != nil {
-			wg.Done()
-		}
 		return nil, errors.New("unknown method")
 	}
 }

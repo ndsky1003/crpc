@@ -3,14 +3,13 @@ package client
 import (
 	"context"
 	"reflect"
-	"sync"
 
 	"github.com/ndsky1003/crpc/v3/coder"
 )
 
 type client_handler interface {
 	//WARN: code_gen ,wg 可能为nil,用于等待释放meta与body buffer
-	HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (any, error)
+	HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte) (any, error)
 }
 
 func (this *Client) Register(rcvr client_handler) error {

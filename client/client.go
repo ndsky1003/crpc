@@ -149,43 +149,41 @@ func (c *Client) HandleMsg(data []byte) error {
 		ctx = trace.WithTraceID(ctx, h.TraceID)
 	}
 
+	metaCopy := make([]byte, len(meta))
+	copy(metaCopy, meta)
+
+	bodyCopy := make([]byte, len(body))
+	copy(bodyCopy, body)
+
 	switch {
 	case h.Type.IsReq():
-		var wg sync.WaitGroup
-		var err error
-		wg.Add(1)
-		go func() {
-			err = c.handleReq(ctx, h, meta, body, &wg)
-		}()
-		wg.Wait()
-		return err
+		go c.handleReq(ctx, h, metaCopy, bodyCopy)
 	case h.Type.IsRes():
-		return c.handleRes(ctx, h, body)
+		go c.handleRes(ctx, h, bodyCopy)
 	default:
 		h.Release()
 		return fmt.Errorf("unknown header type: %d", h.Type)
 	}
+	return nil
 }
 
-func (c *Client) handleReq(ctx context.Context, h *header.Header, meta, body []byte, wg *sync.WaitGroup) error {
+func (c *Client) handleReq(ctx context.Context, h *header.Header, meta, body []byte) error {
 	defer h.Release()
-	res, err := c.invoke_local_func(ctx, h.Module, h.Method, h.MetaCoderT, h.ReqCoderT, meta, body, wg)
+	res, err := c.invoke_local_func(ctx, h.Module, h.Method, h.MetaCoderT, h.ReqCoderT, meta, body)
 	return c.sendReply(h, res, err)
 }
 
-func (c *Client) invoke_local_func(ctx context.Context, mod, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (res any, err error) {
+func (c *Client) invoke_local_func(ctx context.Context, mod, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte) (res any, err error) {
 	module, ok := c.serviceMap.Load(mod)
 	if !ok {
-		wg.Done()
 		err = errors.New(errors.RemoteInternal, "module not found locally")
 		return
 	}
 	if handler, ok := module.(client_handler); !ok {
-		wg.Done()
 		err = errors.New(errors.RemoteInternal, "module does not implement client_handler")
 		return
 	} else {
-		res, err = handler.HandleMsg(ctx, method, metaCoderT, reqCoderT, meta, body, wg)
+		res, err = handler.HandleMsg(ctx, method, metaCoderT, reqCoderT, meta, body)
 		return
 	}
 }
@@ -449,9 +447,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 	if isLocalCall {
 
 		go func() {
-			var dummyWg sync.WaitGroup
-			dummyWg.Add(1)
-			res, err := c.invoke_local_func(ctx, module, method, metaT, reqT, metaBytes, bodyBytes, &dummyWg)
+			res, err := c.invoke_local_func(ctx, module, method, metaT, reqT, metaBytes, bodyBytes)
 			if err != nil {
 				call.Error = err
 			} else if call.Reply != nil {
