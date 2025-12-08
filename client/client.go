@@ -150,14 +150,12 @@ func (c *Client) HandleMsg(data []byte) error {
 		ctx = trace.WithTraceID(ctx, h.TraceID)
 	}
 
-	metaCopy := make([]byte, len(meta))
-	copy(metaCopy, meta)
-
 	bodyCopy := make([]byte, len(body))
 	copy(bodyCopy, body)
-
 	switch {
 	case h.Type.IsReq():
+		metaCopy := make([]byte, len(meta))
+		copy(metaCopy, meta)
 		go c.handleReq(ctx, h, metaCopy, bodyCopy)
 	case h.Type.IsRes():
 		if h.Type == headertype.BroadcastRes {
@@ -165,7 +163,6 @@ func (c *Client) HandleMsg(data []byte) error {
 				log.Println("handleRes :", err)
 			}
 		} else {
-			// 普通 RPC：不关心顺序，维持异步
 			go c.handleRes(ctx, h, bodyCopy)
 		}
 	default:
@@ -343,7 +340,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		call.BroadcaseResNewFunc = opt.BroadcastResNewFunc
 		call.BroadcaseResCallBack = opt.BroadcastResCallBack
 
-		// 1. 初始化缓冲通道 (大小根据业务压力调整，这里设为 64)
+		//TODO: 修改这个硬编码
 		call.broadcastCh = make(chan broadcastResult, 64)
 		subCtx, cancel := context.WithCancel(ctx)
 		call.ctx = subCtx
