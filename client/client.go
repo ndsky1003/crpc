@@ -2,10 +2,9 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,9 +12,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/ndsky1003/crpc/v3/coder"
+	"github.com/ndsky1003/crpc/v3/compressor"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
 	"github.com/ndsky1003/crpc/v3/protocol/header"
+	"github.com/ndsky1003/crpc/v3/protocol/header/headerflags"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headerstatus"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
 	"github.com/ndsky1003/net/client"
@@ -32,17 +33,15 @@ type Client struct {
 	serviceMap sync.Map // map[string]*service (本地服务注册)
 }
 
-type Call struct {
-	Seq   uint64
-	Reply any
-	Error error
-	Done  chan *Call
-}
-
 func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err error) {
 	opt := Options().
 		SetWeight(10).
 		SetVerifyJwtExpire(5 * time.Second).
+		SetDebug(false).
+		SetMetaCoderT(coder.JSON).
+		SetReqCoderT(coder.JSON).
+		SetResCoderT(coder.JSON).
+		SetCompressT(compressor.Raw).
 		Merge(opts...)
 
 	if opt.Name == nil {
@@ -132,7 +131,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	if err := coder.Unmarshal(coder.Msgp, claim.Data, &resp); err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
-	if res_h.Status.IsOk() {
+	if res_h.Code.IsOK() {
 		this.UUID = resp.UUID
 		return nil
 	}
@@ -145,33 +144,106 @@ func (c *Client) HandleMsg(data []byte) error {
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
-	// 1. 如果是 Reply 类型 (我发出去的请求回来了)
-	if h.Type.IsRes() {
-		defer h.Release()
-		val, ok := c.pending.LoadAndDelete(h.Seq)
-		if !ok {
-			return nil // 可能已超时或被移除
-		}
-		call := val.(*Call)
-		if h.Status.IsOk() { //reply 接收
+	switch {
+	case h.Type.IsReq():
+		return c.handleReq(h, meta, body)
+	case h.Type.IsRes():
+		return c.handleRes(h, body)
+	default:
+		h.Release()
+		return fmt.Errorf("unknown header type: %d", h.Type)
+	}
+}
+
+func (c *Client) handleReq(h *header.Header, meta, body []byte) error {
+	return c.handleRemoteCall(h, meta, body)
+}
+
+func (c *Client) handleRes(h *header.Header, body []byte) error {
+	defer h.Release()
+	seq := h.Seq
+
+	// 1. 修正：使用 Load 而不是 LoadAndDelete
+	// 防止广播流中间出现 "真空期" 导致后续包丢失
+	val, ok := c.pending.Load(seq)
+	if !ok {
+		return nil // 确实找不到了（可能已超时被清理）
+	}
+	call := val.(*call_)
+
+	// 标记该次调用是否应该结束（从 Map 移除 + Close Channel）
+	shouldFinish := false
+
+	// 2. 统一处理逻辑，减少重复代码
+	// 无论是 OK 还是 Error，如果是广播，流程都很像
+	isBroadcast := h.Type == headertype.BroadcastRes
+
+	if h.Code.IsOK() {
+		// --- 成功处理 ---
+		if isBroadcast {
+			// 广播成功
+			if call.BroadcaseResNewFunc == nil || call.BroadcaseResCallBack == nil {
+				// 配置错误：直接结束，不留后患
+				call.Error = errors.New(errors.ClientInternal, "broadcast callbacks missing")
+				shouldFinish = true
+			} else {
+				reply := call.BroadcaseResNewFunc()
+				if err := coder.Unmarshal(h.ResCoderT, body, reply); err != nil {
+					// 反序列化失败：视为严重错误，终止广播
+					call.Error = errors.New(errors.ClientInternal, err.Error())
+					shouldFinish = true
+				} else {
+					// 触发用户回调
+					cont := call.BroadcaseResCallBack(reply, nil)
+					// 只有当 (用户想继续) 且 (服务端没发EOS) 时，才继续保留
+					if !cont || h.Flags.IsEOS() {
+						shouldFinish = true
+					}
+				}
+			}
+		} else {
+			// 普通 RPC 成功
 			if call.Reply != nil {
 				if err := coder.Unmarshal(h.ResCoderT, body, call.Reply); err != nil {
 					call.Error = errors.New(errors.ClientInternal, err.Error())
 				}
 			}
-		} else {
-			var res_err errors.Error
-			if err := coder.Unmarshal(coder.Msgp, body, res_err); err != nil {
-				call.Error = errors.New(errors.ClientInternal, err.Error())
-			}
+			shouldFinish = true
 		}
-		call.Done <- call //NOTE: 这里一定不能阻塞，否则影响读消息
-		return nil
+	} else {
+		// --- 错误处理 ---
+		// 解析服务端传回的错误信息
+		var resErr errors.Error
+		// 3. 修正：传入指针 &resErr
+		if err := coder.Unmarshal(coder.Msgp, body, &resErr); err != nil {
+			// 如果连错误包都解不开，只好报内部错误
+			call.Error = errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
+		} else {
+			call.Error = &resErr
+		}
+
+		if isBroadcast {
+			// 广播出错：通知用户，并询问是否继续（有些错误可能不致命？）
+			if call.BroadcaseResCallBack != nil {
+				// 传 nil reply, 传 error
+				cont := call.BroadcaseResCallBack(nil, call.Error)
+				if !cont || h.Flags.IsEOS() {
+					shouldFinish = true
+				}
+			} else {
+				shouldFinish = true
+			}
+		} else {
+			// 普通 RPC 出错：直接结束
+			shouldFinish = true
+		}
 	}
 
-	// 2. 如果是 Call/Broadcast 类型 (别人调我)
-	if h.Type.IsReq() {
-		return c.handleRemoteCall(h, meta, body)
+	// 4. 统一收尾
+	if shouldFinish {
+		// 只有在真正结束时，才从 Map 中移除
+		c.pending.Delete(seq)
+		call.done()
 	}
 
 	return nil
@@ -180,13 +252,11 @@ func (c *Client) HandleMsg(data []byte) error {
 func (c *Client) sendReply(h *header.Header, res any, err error) {
 	defer h.Release()
 	req_type := h.Type
-	var res_type headertype.T
+	res_type := headertype.None
 	switch req_type {
 	case headertype.Req:
 		res_type = headertype.Res
 	case headertype.BroadcastReq:
-		res_type = headertype.BroadcastRes
-	case headertype.Send:
 		res_type = headertype.BroadcastRes
 	default:
 		log.Println("unknown request type:", req_type)
@@ -194,35 +264,39 @@ func (c *Client) sendReply(h *header.Header, res any, err error) {
 	}
 	h.SetType(res_type)
 	if err != nil {
-		h.SetStatus(headerstatus.Failed).SetResCoderT(coder.Msgp)
-		var rpcErr *protocol.Error
-		if e, ok := err.(*protocol.Error); ok {
+		h.SetStatus(h.Status.SetOff(headerstatus.OK)).SetResCoderT(coder.Msgp)
+		var rpcErr *errors.Error
+		if e, ok := err.(*errors.Error); ok {
 			rpcErr = e
 		} else {
-			rpcErr = protocol.NewError(500, err.Error())
+			rpcErr = errors.New(errors.RemoteInternal, err.Error())
 		}
 		body, err := coder.Marshal(coder.Msgp, rpcErr)
 		if err != nil {
 			log.Println("marshal error:", err)
+			return
 		}
 		data, err := protocol.Pack(h, nil, body)
 		if err != nil {
 			log.Println("pack error:", err)
+			return
 		}
 		if sendErr := c.SendPacket(context.Background(), data); sendErr != nil {
 			log.Println("send error:", sendErr)
 		}
 		return
 	}
-	h.SetStatus(headerstatus.StatusOK)
+	h.SetStatus(h.Status.SetOn(headerstatus.OK))
 	body, err := coder.Marshal(h.ResCoderT, res)
 	if err != nil {
 		log.Println("marshal error:", err)
+		return
 	}
 
 	data, packErr := protocol.Pack(h, nil, []byte(body))
 	if packErr != nil {
 		log.Println("pack error:", packErr)
+		return
 	}
 
 	if sendErr := c.SendPacket(context.Background(), data); sendErr != nil {
@@ -233,7 +307,7 @@ func (c *Client) sendReply(h *header.Header, res any, err error) {
 func (c *Client) handleRemoteCall(h *header.Header, meta, body []byte) error {
 	module, ok := c.serviceMap.Load(h.Module)
 	if !ok {
-		go c.sendReply(h, nil, errors.New("module not found locally"))
+		go c.sendReply(h, nil, errors.New(errors.RemoteInternal, "module not found locally"))
 		return nil
 	}
 	if handler, ok := module.(client_handler); ok {
@@ -246,88 +320,181 @@ func (c *Client) handleRemoteCall(h *header.Header, meta, body []byte) error {
 		wg.Wait()
 		return nil
 	} else {
-		go c.sendReply(h, nil, errors.New("module does not implement client_handler"))
+		go c.sendReply(h, nil, errors.New(errors.RemoteInternal, "module does not implement client_handler"))
 	}
 	return nil
 }
 
-func (c *Client) SendPacket(ctx context.Context, data [][]byte) error {
-	return c.client.Sends(ctx, data)
-}
-
-// --- 统一调用入口 ---
-func (c *Client) Call(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
-	// opt := Options().Merge(c.opt).Merge(opts...)
-	// 1. 本地调用拦截 (需求 4)
-	if serviceName == c.Name {
-		return c.invokeLocal(serviceName, method, args, reply)
+func (c *Client) Broadcast(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
+	call := c._go(ctx, headertype.BroadcastReq, serviceName, method, args, reply, opts...)
+	defer call.Release()
+	if call.Error != nil {
+		return call.Error
 	}
-
-	// 2. 远程网络调用
-	seq := atomic.AddUint64(&c.seq, 1)
-	h := &header.Header{
-		Seq:       seq,
-		Type:      protocol.TypeCall,
-		ToService: serviceName,
-		Method:    method,
-		TargetSid: options.TargetSid,
-	}
-	if options.Broadcast {
-		h.Type = protocol.TypeBroadcast
-	}
-
-	bodyBytes, _ := json.Marshal(args)
-	packet, _ := protocol.Pack(h, nil, bodyBytes)
-
-	call := &Call{
-		Seq:   seq,
-		Reply: reply,
-		Done:  make(chan *Call, 1),
-	}
-
-	if !options.Broadcast {
-		c.pending.Store(seq, call)
-	}
-
-	if err := c.client.Send(ctx, packet); err != nil {
-		c.pending.Delete(seq)
-		return err
-	}
-
-	if options.Broadcast {
-		return nil
-	}
-
 	select {
 	case <-ctx.Done():
-		c.pending.Delete(seq)
+		call.Error = errors.New(errors.ClientInternal, ctx.Err().Error())
+		c.pending.Delete(call.seq)
 		return ctx.Err()
 	case call := <-call.Done:
 		return call.Error
 	}
 }
 
-func (c *Client) invokeLocal(serviceName, method string, args, reply any) error {
-	val, ok := c.serviceMap.Load(serviceName)
-	if !ok {
-		return fmt.Errorf("local service %s not found", serviceName)
+func (c *Client) Call(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
+	call := c.Go(ctx, serviceName, method, args, reply, opts...)
+	defer call.Release()
+	if call.Error != nil {
+		return call.Error
 	}
-	svc := val.(*service)
-	m, ok := svc.methods[method]
-	if !ok {
-		return fmt.Errorf("local method %s not found", method)
+	select {
+	case <-ctx.Done():
+		call.Error = errors.New(errors.ClientInternal, ctx.Err().Error())
+		c.pending.Delete(call.seq)
+		return ctx.Err()
+	case call := <-call.Done:
+		return call.Error
+	}
+}
+func (c *Client) Go(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) (call *call_) {
+	return c._go(ctx, headertype.Req, serviceName, method, args, reply, opts...)
+}
+
+func (c *Client) Send(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
+	call := c._go(ctx, headertype.Send, serviceName, method, args, reply, opts...)
+	defer call.Release()
+	return call.Error
+}
+
+// WARNING: 线程安全
+// Call need release manually after use
+func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method string, args, reply any, opts ...*Option) (call *call_) {
+	call = GetCall()
+	if ctx == nil {
+		call.Error = errors.New(errors.ClientInvalidArgs, "context is required")
+		call.done()
+		return
+	}
+	if serviceName == "" {
+		call.Error = errors.New(errors.ClientInvalidArgs, "service name is required")
+		call.done()
+		return
+	}
+	module, method, err := c.parseModuleFunc(method)
+	if err != nil {
+		call.Error = errors.New(errors.ClientInternal, err.Error())
+		call.done()
+		return
+	}
+	opt := c.opt.Merge(opts...)
+
+	if ht == headertype.BroadcastReq {
+		if opt.BroadcastResNewFunc == nil || opt.BroadcastResCallBack == nil {
+			call.Error = errors.New(errors.ClientInvalidArgs, "BroadcaseResNewFunc and BroadcaseResCallBack are required for broadcast calls")
+			call.done()
+			return
+		}
+		call.BroadcaseResNewFunc = opt.BroadcastResNewFunc
+		call.BroadcaseResCallBack = opt.BroadcastResCallBack
+	}
+	seq := atomic.AddUint64(&c.seq, 1)
+	h := header.Get()
+	h.SetType(ht).
+		SetMetaCoderT(*opt.MetaCoderT).
+		SetReqCoderT(*opt.ReqCoderT).
+		SetResCoderT(*opt.ResCoderT).
+		SetCompressT(*opt.CompressT).
+		SetToService(serviceName).
+		SetModule(module).
+		SetMethod(method).
+		SetSeq(seq)
+
+	if *opt.Debug {
+		h.Flags.With(headerflags.Debug)
 	}
 
-	// 直接反射调用，不进行序列化
-	fn := m.method.Func
-	ret := fn.Call([]reflect.Value{
-		svc.rcvr,
-		reflect.ValueOf(args),
-		reflect.ValueOf(reply),
-	})
-
-	if errInter := ret[0].Interface(); errInter != nil {
-		return errInter.(error)
+	bodyBytes, err := coder.Marshal(h.ReqCoderT, args)
+	if err != nil {
+		h.Release()
+		call.Error = errors.New(errors.ClientInternal, err.Error())
+		call.done()
+		return
 	}
-	return nil
+
+	var metaBytes []byte
+	if opt.Meta != nil {
+		if meta_bytes, err := coder.Marshal(h.MetaCoderT, opt.Meta); err != nil {
+			h.Release()
+			call.Error = errors.New(errors.ClientInternal, err.Error())
+			call.done()
+			return
+		} else {
+			metaBytes = meta_bytes
+		}
+	}
+
+	packet, err := protocol.Pack(h, metaBytes, bodyBytes)
+	h.Release()
+	if err != nil {
+		call.Error = errors.New(errors.ClientInternal, err.Error())
+		call.done()
+		return
+	}
+
+	call.seq = seq
+	call.Reply = reply
+
+	if err := c.client.Sends(ctx, packet, &opt.Option); err != nil {
+		call.Error = errors.New(errors.ClientInternal, err.Error())
+		call.done()
+		return
+	}
+	if ht != headertype.Send {
+		c.pending.Store(seq, call)
+	}
+	return call
+}
+
+// func (c *Client) invokeLocal(serviceName, method string, args, reply any) error {
+// 	val, ok := c.serviceMap.Load(serviceName)
+// 	if !ok {
+// 		return fmt.Errorf("local service %s not found", serviceName)
+// 	}
+// 	svc := val.(*service)
+// 	m, ok := svc.methods[method]
+// 	if !ok {
+// 		return fmt.Errorf("local method %s not found", method)
+// 	}
+//
+// 	// 直接反射调用，不进行序列化
+// 	fn := m.method.Func
+// 	ret := fn.Call([]reflect.Value{
+// 		svc.rcvr,
+// 		reflect.ValueOf(args),
+// 		reflect.ValueOf(reply),
+// 	})
+//
+// 	if errInter := ret[0].Interface(); errInter != nil {
+// 		return errInter.(error)
+// 	}
+// 	return nil
+// }
+
+func (c *Client) parseModuleFunc(raw string) (module, function string, err error) {
+	if raw == "" {
+		// 建议错误信息更明确
+		return "", "", fmt.Errorf("%w: input is empty", errors.ModuleFuncError)
+	}
+
+	before, after, found := strings.Cut(raw, ".")
+
+	if !found {
+		return "", "", fmt.Errorf("%w: missing dot separator in '%s'", errors.ModuleFuncError, raw)
+	}
+
+	if before == "" || after == "" {
+		return "", "", fmt.Errorf("%w: invalid format '%s', expect 'module.function'", errors.ModuleFuncError, raw)
+	}
+
+	return before, after, nil
 }

@@ -5,52 +5,49 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/compressor"
-	"github.com/ndsky1003/crpc/v3/protocol/header/headerstatus"
+	"github.com/ndsky1003/crpc/v3/protocol/header/headercode"
+	"github.com/ndsky1003/crpc/v3/protocol/header/headerflags"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
 )
 
-// | Version |Type | Status |  CoderT |  CoderT |  CoderT |CompressType|    FromService    | ToService       |      Module       |   Method	       |  Seq     | MataLen  | RequestLen | Checksum |
-// +---------+----------+---------+---------+---------+------------+-------------------+-----------------+-------------------+-----------------+----------+----------+------------+----------+
-// |  uint32 |uint8|  uint8 | uint8  | uint8  | uint8  |   uint8   |  uvarint (1byte)+ string   | uvarint+ string | uvarint + string  | uvarint +string |  uvarint |  uvarint  |   uvarint  |  uint32  |
+// +------+-------+------+------+------+------+------+------------------+-----------------------+...
+// | Type | Flags | Code | Meta | Req  | Res  | Comp | UUID (Optional)  | Strings & Varints ... |
+// |  1B  |   1B  |  1B  |  1B  |  1B  |  1B  |  1B  | 16B (if flag set)| (Length + Bytes) ...  |
+// +------+-------+------+------+------+------+------+------------------+-----------------------+
+// ^ idx=0                                           ^ idx=7            ^ idx=23 (if has UUID)
 type Header struct {
-	Version         uint32         //4
-	Type            headertype.T   //1
-	Status          headerstatus.T //1
-	MetaCoderT      coder.T        //1
-	ReqCoderT       coder.T        //1
-	ResCoderT       coder.T        //1
-	CompressT       compressor.T   //1
-	FromServiceUUID string         //1 长度超过127就报错 ,实际上100就试上线
-	ToService       string         //1 同上
-	Module          string         //1 同上
-	Method          string         //1 同上
-	Seq             uint64         //10
-	MetaLen         uint64         //10
-	BodyLen         uint64         //10
-	// Checksum    uint32       //4 //tcp 层面已经有checksum了，这里可以不需要
+	Type       headertype.T  //1
+	Flags      headerflags.T //1
+	Code       headercode.T  //1
+	MetaCoderT coder.T       //1
+	ReqCoderT  coder.T       //1
+	ResCoderT  coder.T       //1
+	CompressT  compressor.T  //1
+	UUID       uuid.UUID     //16 可能不能存在 可选字段，用于跟踪请求，可以不使用 ,这个直接放在最后,才有可能可选,否则固定消费16个字节
+	ToService  string        //10 同上
+	Module     string        //10 同上
+	Method     string        //10 同上
+	Seq        uint64        //10
+	MetaLen    uint64        //10
+	BodyLen    uint64        //10
 }
 
 const (
-	// MaxHeaderSize = 4 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 10 + 10 + 10  (10 refer to binary.MaxVarintLen64)
-	MaxHeaderSize = 44
-	//防止链接异常，传入的第一个数字过大，导致耗尽系统资源，已经遇到过该问题，所以修复
-	FrozeMaxHeaderSize = MaxHeaderSize + 100 + 100 + 100 + 100 //固定最大header长度,超过这个长度就属于异常数据
+	// 固定部分的长度: 7个uint8
+	BaseFixedSize = 7
+	MaxStringLen  = 1024 // 限制单个字符串最大长度，防止恶意攻击
 )
-
-func (this *Header) SetVersion(v uint32) *Header {
-	this.Version = v
-	return this
-}
 
 func (this *Header) SetType(t headertype.T) *Header {
 	this.Type = t
 	return this
 }
 
-func (this *Header) SetStatus(t headerstatus.T) *Header {
-	this.Status = t
+func (this *Header) SetCode(t headercode.T) *Header {
+	this.Code = t
 	return this
 }
 
@@ -71,11 +68,6 @@ func (this *Header) SetResCoderT(t coder.T) *Header {
 
 func (this *Header) SetCompressT(t compressor.T) *Header {
 	this.CompressT = t
-	return this
-}
-
-func (this *Header) SetFromService(s string) *Header {
-	this.FromServiceUUID = s
 	return this
 }
 
@@ -109,54 +101,72 @@ func (this *Header) SetBodyLen(s uint64) *Header {
 	return this
 }
 
-// func (this *Header) SetChecksum(s uint32) *Header {
-// 	this.Checksum = s
-// 	return this
-// }
+func (this *Header) SetUUID(u uuid.UUID) *Header {
+	this.UUID = u
+	return this
+}
 
 const (
 	uint_32_size = 4
-	// uint_16_size = 2
-	uint_8_size = 2
+	uint_8_size  = 1
 )
 
 // Marshal will encode request header into a byte slice
 func (r *Header) Marshal() ([]byte, error) {
-	length := MaxHeaderSize + len(r.FromServiceUUID) + len(r.ToService) + len(r.Module) + len(r.Method)
-	if length > FrozeMaxHeaderSize {
-		return nil, fmt.Errorf("heaer size:%v, > FrozeMaxHeaderSize:%v", length, FrozeMaxHeaderSize)
+	size := BaseFixedSize
+
+	hasUUID := r.UUID != uuid.Nil
+	tmpFlags := r.Flags
+	if hasUUID {
+		size += 16
+		tmpFlags.Add(headerflags.UUID)
+	} else {
+		tmpFlags.Remove(headerflags.UUID)
 	}
+	r.Flags = tmpFlags
+
+	size += varintStrSize(r.ToService)
+	size += varintStrSize(r.Module)
+	size += varintStrSize(r.Method)
+
+	size += uvarintSize(r.Seq)
+	size += uvarintSize(r.MetaLen)
+	size += uvarintSize(r.BodyLen)
+
+	header := make([]byte, size)
+
 	idx := 0
-	header := make([]byte, length)
-
-	binary.LittleEndian.PutUint32(header[idx:], r.Version)
-	idx += uint_32_size
-
-	header[idx+1] = uint8(r.Type)
+	header[idx] = uint8(r.Type)
 	idx += uint_8_size
 
-	header[idx+1] = uint8(r.Status)
+	header[idx] = uint8(r.Flags)
 	idx += uint_8_size
 
-	header[idx+1] = uint8(r.MetaCoderT)
+	header[idx] = uint8(r.Code)
 	idx += uint_8_size
 
-	header[idx+1] = uint8(r.ReqCoderT)
+	header[idx] = uint8(r.MetaCoderT)
 	idx += uint_8_size
 
-	header[idx+1] = uint8(r.ResCoderT)
+	header[idx] = uint8(r.ReqCoderT)
 	idx += uint_8_size
 
-	header[idx+1] = uint8(r.CompressT)
+	header[idx] = uint8(r.ResCoderT)
 	idx += uint_8_size
 
-	idx += binary_write_string(header[idx:], r.FromServiceUUID)
+	header[idx] = uint8(r.CompressT)
+	idx += uint_8_size
 
-	idx += binary_write_string(header[idx:], r.ToService)
+	if hasUUID {
+		copy(header[idx:], r.UUID[:])
+		idx += 16
+	}
 
-	idx += binary_write_string(header[idx:], r.Module)
+	idx += writeString(header[idx:], r.ToService)
 
-	idx += binary_write_string(header[idx:], r.Method)
+	idx += writeString(header[idx:], r.Module)
+
+	idx += writeString(header[idx:], r.Method)
 
 	idx += binary.PutUvarint(header[idx:], r.Seq)
 
@@ -164,55 +174,61 @@ func (r *Header) Marshal() ([]byte, error) {
 
 	idx += binary.PutUvarint(header[idx:], r.BodyLen)
 
-	// binary.LittleEndian.PutUint32(header[idx:], r.Checksum)
-	// idx += uint_32_size
-
 	return header[:idx], nil
 }
 
 // Unmarshal will decode request header into a byte slice
 func (r *Header) Unmarshal(data []byte) (err error) {
-	if len(data) == 0 {
-		return errors.New("empty header data")
+	if len(data) < BaseFixedSize {
+		return errors.New("header too short")
 	}
 
+	// 捕获潜在的 bounds check panic
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("unmarshal header panic: %v", r)
+			err = fmt.Errorf("malformed header: %v", r)
 		}
 	}()
 	idx, size := 0, 0
-	r.Version = binary.LittleEndian.Uint32(data[idx:])
-	idx += uint_32_size
 
-	r.Type = headertype.T(data[idx+1])
+	r.Type = headertype.T(data[idx])
 	idx += uint_8_size
 
-	r.Status = headerstatus.T(data[idx+1])
+	r.Flags = headerflags.T(data[idx])
 	idx += uint_8_size
 
-	r.MetaCoderT = coder.T(data[idx+1])
+	r.Code = headercode.T(data[idx])
 	idx += uint_8_size
 
-	r.ReqCoderT = coder.T(data[idx+1])
+	r.MetaCoderT = coder.T(data[idx])
 	idx += uint_8_size
 
-	r.ResCoderT = coder.T(data[idx+1])
+	r.ReqCoderT = coder.T(data[idx])
 	idx += uint_8_size
 
-	r.CompressT = compressor.T(data[idx+1])
+	r.ResCoderT = coder.T(data[idx])
 	idx += uint_8_size
 
-	r.FromServiceUUID, size = binary_read_string(data[idx:])
+	r.CompressT = compressor.T(data[idx])
+	idx += uint_8_size
+
+	if r.Flags.HasUUID() {
+		if len(data[idx:]) < 16 {
+			return errors.New("uuid flag set but data insufficient")
+		}
+		copy(r.UUID[:], data[idx:idx+16])
+		idx += 16
+	} else {
+		r.UUID = uuid.Nil
+	}
+
+	r.ToService, size = readString(data[idx:])
 	idx += size
 
-	r.ToService, size = binary_read_string(data[idx:])
+	r.Module, size = readString(data[idx:])
 	idx += size
 
-	r.Module, size = binary_read_string(data[idx:])
-	idx += size
-
-	r.Method, size = binary_read_string(data[idx:])
+	r.Method, size = readString(data[idx:])
 	idx += size
 
 	r.Seq, size = binary.Uvarint(data[idx:])
@@ -224,7 +240,6 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 	r.BodyLen, size = binary.Uvarint(data[idx:])
 	idx += size
 
-	// r.Checksum = binary.LittleEndian.Uint32(data[idx:])
 	return
 }
 
@@ -237,21 +252,20 @@ func (h *Header) Release() {
 }
 
 func (r *Header) reset() {
-	r.Version = 0
 	r.Type = 0
-	r.Status = 0
+	r.Flags = 0
+	r.Code = 0
 	r.MetaCoderT = 0
 	r.ReqCoderT = 0
 	r.ResCoderT = 0
 	r.CompressT = 0
-	r.FromServiceUUID = ""
+	r.UUID = uuid.Nil
 	r.ToService = ""
 	r.Module = ""
 	r.Method = ""
 	r.Seq = 0
 	r.MetaLen = 0
 	r.BodyLen = 0
-	// r.Checksum = 0
 }
 
 func (h *Header) GetMarshalType() coder.T {
@@ -262,19 +276,36 @@ func (h *Header) GetMarshalType() coder.T {
 	}
 }
 
-func binary_read_string(data []byte) (string, int) {
-	idx := 0
-	length, size := binary.Uvarint(data)
-	idx += size
-	str := string(data[idx : idx+int(length)])
-	idx += len(str)
-	return str, idx
+func uvarintSize(x uint64) int {
+	// binary.PutUvarint 的逻辑
+	i := 0
+	for x >= 0x80 {
+		x >>= 7
+		i++
+	}
+	return i + 1
 }
 
-func binary_write_string(data []byte, str string) int {
-	idx := 0
-	idx += binary.PutUvarint(data, uint64(len(str)))
-	copy(data[idx:], str)
-	idx += len(str)
-	return idx
+func varintStrSize(s string) int {
+	return uvarintSize(uint64(len(s))) + len(s)
+}
+
+func readString(b []byte) (string, int) {
+	l, n := binary.Uvarint(b)
+	if n <= 0 {
+		panic("invalid varint len") // defer 会捕获
+	}
+	if uint64(len(b[n:])) < l {
+		panic("buffer too short for string")
+	}
+	if l > MaxStringLen {
+		panic("string too long") // 安全防御
+	}
+	return string(b[n : n+int(l)]), n + int(l)
+}
+
+func writeString(b []byte, s string) int {
+	n := binary.PutUvarint(b, uint64(len(s)))
+	copy(b[n:], s)
+	return n + len(s)
 }

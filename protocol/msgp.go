@@ -1,4 +1,5 @@
 //go:generate msgp --tests=false
+//msgp:replace uuid.UUID [16]byte
 package protocol
 
 import (
@@ -17,6 +18,7 @@ type VerifyRes struct {
 	Message string
 }
 
+//msgp:ignore JwtClaims
 type JwtClaims struct {
 	Data []byte `json:"d"`
 	jwt.RegisteredClaims

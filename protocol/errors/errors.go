@@ -1,7 +1,11 @@
 //go:generate msgp --tests=false
 package errors
 
-import "fmt"
+import (
+	"fmt"
+)
+
+var ModuleFuncError = New(ClientInternal, "invalid module/function format")
 
 type Error struct {
 	Code    uint16 `msg:"c"`          // 错误码 (用于程序逻辑判断，如 1001=UserNotFound)

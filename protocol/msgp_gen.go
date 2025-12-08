@@ -24,6 +24,12 @@ func (z *VerifyReq) DecodeMsg(dc *msgp.Reader) (err error) {
 			return
 		}
 		switch msgp.UnsafeString(field) {
+		case "UUID":
+			err = dc.ReadExactBytes((z.UUID)[:])
+			if err != nil {
+				err = msgp.WrapError(err, "UUID")
+				return
+			}
 		case "Name":
 			z.Name, err = dc.ReadString()
 			if err != nil {
@@ -48,10 +54,20 @@ func (z *VerifyReq) DecodeMsg(dc *msgp.Reader) (err error) {
 }
 
 // EncodeMsg implements msgp.Encodable
-func (z VerifyReq) EncodeMsg(en *msgp.Writer) (err error) {
-	// map header, size 2
+func (z *VerifyReq) EncodeMsg(en *msgp.Writer) (err error) {
+	// map header, size 3
+	// write "UUID"
+	err = en.Append(0x83, 0xa4, 0x55, 0x55, 0x49, 0x44)
+	if err != nil {
+		return
+	}
+	err = en.WriteBytes((z.UUID)[:])
+	if err != nil {
+		err = msgp.WrapError(err, "UUID")
+		return
+	}
 	// write "Name"
-	err = en.Append(0x82, 0xa4, 0x4e, 0x61, 0x6d, 0x65)
+	err = en.Append(0xa4, 0x4e, 0x61, 0x6d, 0x65)
 	if err != nil {
 		return
 	}
@@ -74,11 +90,14 @@ func (z VerifyReq) EncodeMsg(en *msgp.Writer) (err error) {
 }
 
 // MarshalMsg implements msgp.Marshaler
-func (z VerifyReq) MarshalMsg(b []byte) (o []byte, err error) {
+func (z *VerifyReq) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// map header, size 2
+	// map header, size 3
+	// string "UUID"
+	o = append(o, 0x83, 0xa4, 0x55, 0x55, 0x49, 0x44)
+	o = msgp.AppendBytes(o, (z.UUID)[:])
 	// string "Name"
-	o = append(o, 0x82, 0xa4, 0x4e, 0x61, 0x6d, 0x65)
+	o = append(o, 0xa4, 0x4e, 0x61, 0x6d, 0x65)
 	o = msgp.AppendString(o, z.Name)
 	// string "Weight"
 	o = append(o, 0xa6, 0x57, 0x65, 0x69, 0x67, 0x68, 0x74)
@@ -104,6 +123,12 @@ func (z *VerifyReq) UnmarshalMsg(bts []byte) (o []byte, err error) {
 			return
 		}
 		switch msgp.UnsafeString(field) {
+		case "UUID":
+			bts, err = msgp.ReadExactBytes(bts, (z.UUID)[:])
+			if err != nil {
+				err = msgp.WrapError(err, "UUID")
+				return
+			}
 		case "Name":
 			z.Name, bts, err = msgp.ReadStringBytes(bts)
 			if err != nil {
@@ -129,8 +154,8 @@ func (z *VerifyReq) UnmarshalMsg(bts []byte) (o []byte, err error) {
 }
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
-func (z VerifyReq) Msgsize() (s int) {
-	s = 1 + 5 + msgp.StringPrefixSize + len(z.Name) + 7 + msgp.IntSize
+func (z *VerifyReq) Msgsize() (s int) {
+	s = 1 + 5 + msgp.ArrayHeaderSize + (16 * (msgp.ByteSize)) + 5 + msgp.StringPrefixSize + len(z.Name) + 7 + msgp.IntSize
 	return
 }
 
@@ -152,6 +177,12 @@ func (z *VerifyRes) DecodeMsg(dc *msgp.Reader) (err error) {
 			return
 		}
 		switch msgp.UnsafeString(field) {
+		case "UUID":
+			err = dc.ReadExactBytes((z.UUID)[:])
+			if err != nil {
+				err = msgp.WrapError(err, "UUID")
+				return
+			}
 		case "Message":
 			z.Message, err = dc.ReadString()
 			if err != nil {
@@ -170,10 +201,20 @@ func (z *VerifyRes) DecodeMsg(dc *msgp.Reader) (err error) {
 }
 
 // EncodeMsg implements msgp.Encodable
-func (z VerifyRes) EncodeMsg(en *msgp.Writer) (err error) {
-	// map header, size 1
+func (z *VerifyRes) EncodeMsg(en *msgp.Writer) (err error) {
+	// map header, size 2
+	// write "UUID"
+	err = en.Append(0x82, 0xa4, 0x55, 0x55, 0x49, 0x44)
+	if err != nil {
+		return
+	}
+	err = en.WriteBytes((z.UUID)[:])
+	if err != nil {
+		err = msgp.WrapError(err, "UUID")
+		return
+	}
 	// write "Message"
-	err = en.Append(0x81, 0xa7, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65)
+	err = en.Append(0xa7, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65)
 	if err != nil {
 		return
 	}
@@ -186,11 +227,14 @@ func (z VerifyRes) EncodeMsg(en *msgp.Writer) (err error) {
 }
 
 // MarshalMsg implements msgp.Marshaler
-func (z VerifyRes) MarshalMsg(b []byte) (o []byte, err error) {
+func (z *VerifyRes) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// map header, size 1
+	// map header, size 2
+	// string "UUID"
+	o = append(o, 0x82, 0xa4, 0x55, 0x55, 0x49, 0x44)
+	o = msgp.AppendBytes(o, (z.UUID)[:])
 	// string "Message"
-	o = append(o, 0x81, 0xa7, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65)
+	o = append(o, 0xa7, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65)
 	o = msgp.AppendString(o, z.Message)
 	return
 }
@@ -213,6 +257,12 @@ func (z *VerifyRes) UnmarshalMsg(bts []byte) (o []byte, err error) {
 			return
 		}
 		switch msgp.UnsafeString(field) {
+		case "UUID":
+			bts, err = msgp.ReadExactBytes(bts, (z.UUID)[:])
+			if err != nil {
+				err = msgp.WrapError(err, "UUID")
+				return
+			}
 		case "Message":
 			z.Message, bts, err = msgp.ReadStringBytes(bts)
 			if err != nil {
@@ -232,7 +282,7 @@ func (z *VerifyRes) UnmarshalMsg(bts []byte) (o []byte, err error) {
 }
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
-func (z VerifyRes) Msgsize() (s int) {
-	s = 1 + 8 + msgp.StringPrefixSize + len(z.Message)
+func (z *VerifyRes) Msgsize() (s int) {
+	s = 1 + 5 + msgp.ArrayHeaderSize + (16 * (msgp.ByteSize)) + 8 + msgp.StringPrefixSize + len(z.Message)
 	return
 }
