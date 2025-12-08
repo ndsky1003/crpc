@@ -30,6 +30,7 @@ type Header struct {
 	ToService  string        //10 同上
 	Module     string        //10 同上
 	Method     string        //10 同上
+	TraceID    string        //10 同上
 	Seq        uint64        //10
 	MetaLen    uint64        //10
 	BodyLen    uint64        //10
@@ -86,6 +87,11 @@ func (this *Header) SetMethod(s string) *Header {
 	return this
 }
 
+func (this *Header) SetTraceID(s string) *Header {
+	this.TraceID = s
+	return this
+}
+
 func (this *Header) SetSeq(s uint64) *Header {
 	this.Seq = s
 	return this
@@ -128,6 +134,7 @@ func (r *Header) Marshal() ([]byte, error) {
 	size += varintStrSize(r.ToService)
 	size += varintStrSize(r.Module)
 	size += varintStrSize(r.Method)
+	size += varintStrSize(r.TraceID)
 
 	size += uvarintSize(r.Seq)
 	size += uvarintSize(r.MetaLen)
@@ -167,6 +174,8 @@ func (r *Header) Marshal() ([]byte, error) {
 	idx += writeString(header[idx:], r.Module)
 
 	idx += writeString(header[idx:], r.Method)
+
+	idx += writeString(header[idx:], r.TraceID)
 
 	idx += binary.PutUvarint(header[idx:], r.Seq)
 
@@ -231,6 +240,9 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 	r.Method, size = readString(data[idx:])
 	idx += size
 
+	r.TraceID, size = readString(data[idx:])
+	idx += size
+
 	r.Seq, size = binary.Uvarint(data[idx:])
 	idx += size
 
@@ -263,6 +275,7 @@ func (r *Header) reset() {
 	r.ToService = ""
 	r.Module = ""
 	r.Method = ""
+	r.TraceID = ""
 	r.Seq = 0
 	r.MetaLen = 0
 	r.BodyLen = 0

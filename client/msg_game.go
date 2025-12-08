@@ -2,6 +2,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -20,7 +21,7 @@ func (*msg_game) PlayerInfo(req *PlayerInfoReq) (*PlayerInfoRes, error) {
 }
 
 // code_gen
-func (c *msg_game) HandleMsg(method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (any, error) {
+func (c *msg_game) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (any, error) {
 	switch method {
 	case "PlayerInfo":
 		req := &PlayerInfoReq{}

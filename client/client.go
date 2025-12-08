@@ -11,6 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/ndsky1003/crpc/v3/coder"
+	"github.com/ndsky1003/crpc/v3/comm/trace"
 	"github.com/ndsky1003/crpc/v3/compressor"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
@@ -143,31 +144,36 @@ func (c *Client) HandleMsg(data []byte) error {
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
+	ctx := context.Background()
+	if h.TraceID != "" {
+		ctx = trace.WithTraceID(ctx, h.TraceID)
+	}
+
 	switch {
 	case h.Type.IsReq():
 		var wg sync.WaitGroup
 		var err error
 		wg.Add(1)
 		go func() {
-			err = c.handleReq(h, meta, body, &wg)
+			err = c.handleReq(ctx, h, meta, body, &wg)
 		}()
 		wg.Wait()
 		return err
 	case h.Type.IsRes():
-		return c.handleRes(h, body)
+		return c.handleRes(ctx, h, body)
 	default:
 		h.Release()
 		return fmt.Errorf("unknown header type: %d", h.Type)
 	}
 }
 
-func (c *Client) handleReq(h *header.Header, meta, body []byte, wg *sync.WaitGroup) error {
+func (c *Client) handleReq(ctx context.Context, h *header.Header, meta, body []byte, wg *sync.WaitGroup) error {
 	defer h.Release()
-	res, err := c.invoke_local_func(h.Module, h.Method, h.MetaCoderT, h.ReqCoderT, meta, body, wg)
+	res, err := c.invoke_local_func(ctx, h.Module, h.Method, h.MetaCoderT, h.ReqCoderT, meta, body, wg)
 	return c.sendReply(h, res, err)
 }
 
-func (c *Client) invoke_local_func(mod, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (res any, err error) {
+func (c *Client) invoke_local_func(ctx context.Context, mod, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte, wg *sync.WaitGroup) (res any, err error) {
 	module, ok := c.serviceMap.Load(mod)
 	if !ok {
 		wg.Done()
@@ -179,12 +185,12 @@ func (c *Client) invoke_local_func(mod, method string, metaCoderT coder.T, reqCo
 		err = errors.New(errors.RemoteInternal, "module does not implement client_handler")
 		return
 	} else {
-		res, err = handler.HandleMsg(method, metaCoderT, reqCoderT, meta, body, wg)
+		res, err = handler.HandleMsg(ctx, method, metaCoderT, reqCoderT, meta, body, wg)
 		return
 	}
 }
 
-func (c *Client) handleRes(h *header.Header, body []byte) error {
+func (c *Client) handleRes(ctx, h *header.Header, body []byte) error {
 	defer h.Release()
 	seq := h.Seq
 
@@ -194,7 +200,7 @@ func (c *Client) handleRes(h *header.Header, body []byte) error {
 	if !ok {
 		return nil // 确实找不到了（可能已超时被清理）
 	}
-	call := val.(*call_)
+	call := val.(*Call)
 
 	// 标记该次调用是否应该结束（从 Map 移除 + Close Channel）
 	shouldFinish := false
@@ -329,52 +335,7 @@ func (c *Client) sendPacket(ctx context.Context, packet [][]byte, opts ...*Optio
 	return c.client.Sends(ctx, packet, &opt.Option)
 }
 
-func (c *Client) Broadcast(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
-	call := c._go(ctx, headertype.BroadcastReq, serviceName, method, args, reply, opts...)
-	defer call.Release()
-	if call.Error != nil {
-		return call.Error
-	}
-	select {
-	case <-ctx.Done():
-		call.Error = errors.New(errors.ClientInternal, ctx.Err().Error())
-		c.pending.Delete(call.seq)
-		return ctx.Err()
-	case call := <-call.Done:
-		return call.Error
-	}
-}
-
-func (c *Client) Call(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
-	call := c.Go(ctx, serviceName, method, args, reply, opts...)
-	defer call.Release()
-	if call.Error != nil {
-		return call.Error
-	}
-	select {
-	case <-ctx.Done():
-		call.Error = errors.New(errors.ClientInternal, ctx.Err().Error())
-		c.pending.Delete(call.seq)
-		return ctx.Err()
-	case call := <-call.Done:
-		return call.Error
-	}
-}
-
-// WARNING: 需要自行释放call
-func (c *Client) Go(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) (call *call_) {
-	return c._go(ctx, headertype.Req, serviceName, method, args, reply, opts...)
-}
-
-func (c *Client) Send(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
-	call := c._go(ctx, headertype.Send, serviceName, method, args, reply, opts...)
-	defer call.Release()
-	return call.Error
-}
-
-// WARNING: 线程安全
-// Call need release manually after use
-func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method string, args, reply any, opts ...*Option) (call *call_) {
+func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method string, args, reply any, opts ...*Option) (call *Call) {
 	call = GetCall()
 	if ctx == nil {
 		call.Error = errors.New(errors.ClientInvalidArgs, "context is required")
@@ -394,6 +355,12 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 	}
 	opt := c.opt.Merge(opts...)
 
+	traceID := ""
+	if tid := opt.TraceID; tid != nil {
+		traceID = *tid
+		ctx = trace.WithTraceID(ctx, traceID)
+
+	}
 	if ht == headertype.BroadcastReq {
 		if opt.BroadcastResNewFunc == nil || opt.BroadcastResCallBack == nil {
 			call.Error = errors.New(errors.ClientInvalidArgs, "BroadcaseResNewFunc and BroadcaseResCallBack are required for broadcast calls")
@@ -413,7 +380,9 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		SetToService(serviceName).
 		SetModule(module).
 		SetMethod(method).
+		SetTraceID(traceID).
 		SetSeq(seq)
+
 	isLocalCall := (c.Name == serviceName) && (ht == headertype.Req)
 	metaT := *opt.MetaCoderT
 	reqT := *opt.ReqCoderT
@@ -459,8 +428,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		go func() {
 			var dummyWg sync.WaitGroup
 			dummyWg.Add(1)
-			res, err := c.invoke_local_func(module, method, metaT, reqT, metaBytes, bodyBytes, &dummyWg)
-
+			res, err := c.invoke_local_func(ctx, module, method, metaT, reqT, metaBytes, bodyBytes, &dummyWg)
 			if err != nil {
 				call.Error = err
 			} else if call.Reply != nil {

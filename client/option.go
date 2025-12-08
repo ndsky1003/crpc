@@ -18,6 +18,7 @@ type Option struct {
 	Name                 *string
 	Weight               *int
 	Secret               *string
+	TraceID              *string
 	VerifyJwtExpire      *time.Duration
 	MetaCoderT           *coder.T
 	ReqCoderT            *coder.T
@@ -51,6 +52,11 @@ func (o *Option) SetName(name string) *Option {
 
 func (o *Option) SetSecret(secret string) *Option {
 	o.Secret = &secret
+	return o
+}
+
+func (o *Option) SetTraceID(traceID string) *Option {
+	o.TraceID = &traceID
 	return o
 }
 
@@ -131,6 +137,7 @@ func (o *Option) merge(other *Option) *Option {
 	ut.ResolveOption(&o.Name, other.Name)
 	ut.ResolveOption(&o.Weight, other.Weight)
 	ut.ResolveOption(&o.Secret, other.Secret)
+	ut.ResolveOption(&o.TraceID, other.TraceID)
 	ut.ResolveOption(&o.VerifyJwtExpire, other.VerifyJwtExpire)
 	ut.ResolveOption(&o.Debug, other.Debug)
 	ut.ResolveOption(&o.MetaCoderT, other.MetaCoderT)
