@@ -7,8 +7,8 @@ import (
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
 )
 
-func (c *Client) Broadcast(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
-	call := c._go(ctx, headertype.BroadcastReq, serviceName, method, args, reply, opts...)
+func (c *Client) Broadcast(ctx context.Context, serviceName, method string, args any, opts ...*Option) error {
+	call := c._go(ctx, headertype.BroadcastReq, serviceName, method, args, nil, opts...)
 	if call.Error != nil {
 		return call.Error
 	}
@@ -41,7 +41,7 @@ func (c *Client) Go(ctx context.Context, serviceName, method string, args, reply
 	return c._go(ctx, headertype.Req, serviceName, method, args, reply, opts...)
 }
 
-func (c *Client) Send(ctx context.Context, serviceName, method string, args, reply any, opts ...*Option) error {
-	call := c._go(ctx, headertype.Send, serviceName, method, args, reply, opts...)
+func (c *Client) Send(ctx context.Context, serviceName, method string, args any, opts ...*Option) error {
+	call := c._go(ctx, headertype.Send, serviceName, method, args, nil, opts...)
 	return call.Error
 }

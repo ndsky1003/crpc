@@ -354,7 +354,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		call.BroadcaseResNewFunc = opt.BroadcastResNewFunc
 		call.BroadcaseResCallBack = opt.BroadcastResCallBack
 
-		call.broadcastCh = make(chan broadcastResult, *opt.BroadcastChanCap)
+		call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
 		subCtx, cancel := context.WithCancel(ctx)
 		call.ctx = subCtx
 		call.cancel = cancel

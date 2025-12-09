@@ -10,18 +10,28 @@ import (
 	"go/token"
 	"log"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 )
 
-// 参数定义
+// CLI 参数定义
 var (
-	filePath   = flag.String("f", "", "source file path (e.g., ./msg_game.go)")
-	structName = flag.String("s", "", "struct name to generate (e.g., msg_game)")
-	output     = flag.String("o", "", "output file name (default: stdout)")
+	suffix        string
+	file_path     string
+	out_file_name string
+	out_dir       string
 )
 
-// 方法元数据
+func init() {
+	flag.StringVar(&suffix, "s", "_crpc_server_gen", "生成文件的后缀")
+	flag.StringVar(&file_path, "f", "", "源文件路径")
+	flag.StringVar(&out_file_name, "o", "", "输出文件名（可选）")
+	flag.StringVar(&out_dir, "out_dir", "", "输出目录（可选）")
+}
+
+// MethodInfo 存储方法的元数据
 type MethodInfo struct {
 	Name      string
 	HasCtx    bool
@@ -29,24 +39,64 @@ type MethodInfo struct {
 	ReqType   string // e.g., "*PlayerInfoReq"
 	ResType   string // e.g., "*PlayerInfoRes" or empty
 	IsPointer bool   // Req is pointer?
-	HasReturn bool   // Has return value (other than error)
+	HasReturn bool   // True if returns (Res, error), False if returns (error)
+}
+
+// StructInfo 存储结构体及其对应的方法
+type StructInfo struct {
+	Name    string
+	Methods []MethodInfo
 }
 
 func main() {
 	flag.Parse()
-	if *filePath == "" || *structName == "" {
+
+	// --- 路径处理逻辑 (集成您提供的代码) ---
+	if file_path == "" {
+		dir, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+		filename := os.Getenv("GOFILE")
+		if filename == "" {
+			// 如果不是 go generate 调用且没传参，直接返回不报错
+			return
+		}
+		file_path = filepath.Join(dir, filename)
+	}
+
+	if file_path == "" {
 		flag.Usage()
 		return
 	}
 
-	fset := token.NewFileSet()
-	node, err := parser.ParseFile(fset, *filePath, nil, parser.ParseComments)
-	if err != nil {
-		log.Fatal(err)
+	dir, filename := filepath.Split(file_path)
+	if !strings.HasSuffix(filename, ".go") {
+		panic("源文件后缀必须是 .go")
 	}
 
-	methods := []MethodInfo{}
+	if out_dir == "" {
+		out_dir = dir
+	}
+
+	filenameBase := filename[:len(filename)-3]
+	filename_new := fmt.Sprintf("%s%s.go", filenameBase, suffix)
+	if out_file_name != "" {
+		filename_new = out_file_name
+	}
+
+	out_file_path := filepath.Join(out_dir, filename_new)
+	// ----------------------------------------
+
+	// 解析 AST
+	fset := token.NewFileSet()
+	node, err := parser.ParseFile(fset, file_path, nil, parser.ParseComments)
+	if err != nil {
+		log.Fatalf("Parse file error: %v", err)
+	}
+
 	packageName := node.Name.Name
+	structMap := make(map[string][]MethodInfo)
 
 	// 遍历 AST
 	ast.Inspect(node, func(n ast.Node) bool {
@@ -55,7 +105,7 @@ func main() {
 			return true
 		}
 
-		// 检查接收者是否是目标结构体
+		// 获取接收者类型名称
 		recvType := ""
 		switch t := fn.Recv.List[0].Type.(type) {
 		case *ast.StarExpr:
@@ -66,96 +116,119 @@ func main() {
 			recvType = t.Name
 		}
 
-		if recvType != *structName {
+		if recvType == "" {
 			return true
 		}
 
-		if !fn.Name.IsExported() {
+		// 忽略未导出方法和 HandleMsg 自身
+		if !fn.Name.IsExported() || fn.Name.Name == "HandleMsg" {
 			return true
 		}
 
-		// 忽略 HandleMsg 自身，防止重复生成
-		if fn.Name.Name == "HandleMsg" {
-			return true
+		// 分析方法签名
+		info, isValid := analyzeMethod(fn)
+		if isValid {
+			structMap[recvType] = append(structMap[recvType], info)
 		}
-
-		info := analyzeMethod(fn)
-		methods = append(methods, info)
 		return true
 	})
 
-	// 生成代码
-	code := generateCode(packageName, *structName, methods)
+	// 排序保证生成稳定性
+	var structs []StructInfo
+	for name, methods := range structMap {
+		structs = append(structs, StructInfo{
+			Name:    name,
+			Methods: methods,
+		})
+	}
+	sort.Slice(structs, func(i, j int) bool {
+		return structs[i].Name < structs[j].Name
+	})
 
-	if *output != "" {
-		os.WriteFile(*output, code, 0644)
-	} else {
-		fmt.Println(string(code))
+	if len(structs) == 0 {
+		fmt.Println("// No suitable methods found.")
+		return
+	}
+
+	// 生成代码
+	code := generateCode(packageName, structs)
+
+	// 写入文件
+	if err := os.WriteFile(out_file_path, code, 0644); err != nil {
+		log.Fatalf("Write file error: %v", err)
 	}
 }
 
-func analyzeMethod(fn *ast.FuncDecl) MethodInfo {
+// analyzeMethod 分析函数签名是否符合 RPC 要求
+func analyzeMethod(fn *ast.FuncDecl) (MethodInfo, bool) {
 	info := MethodInfo{Name: fn.Name.Name}
 
-	// 分析参数
-	for _, field := range fn.Type.Params.List {
-		typeStr := exprToString(field.Type)
+	// 1. 分析返回值
+	if fn.Type.Results == nil || len(fn.Type.Results.List) == 0 {
+		return info, false
+	}
+	results := fn.Type.Results.List
+	if len(results) > 2 {
+		return info, false
+	}
 
-		// 1. Context Check
-		if strings.Contains(typeStr, "Context") {
-			info.HasCtx = true
-			continue
-		}
+	// 最后一个返回值必须是 error
+	lastResult := results[len(results)-1]
+	if exprToString(lastResult.Type) != "error" {
+		return info, false
+	}
 
-		// 2. Meta Check (简单启发式：名字叫 meta 或者类型里包含 Meta)
-		// 如果只有一个参数，那肯定是 Req，不是 Meta
-		isMeta := false
-		if len(field.Names) > 0 && strings.ToLower(field.Names[0].Name) == "meta" {
-			isMeta = true
-		}
-		if !isMeta && strings.Contains(typeStr, "Meta") {
-			// 只有当参数大于1个时，才尝试把包含 Meta 的类型认作 Meta
-			// 否则如果请求体叫 MetadataReq 就会误判
-			if info.ReqType == "" { // 还没找到 Req，暂且认为是 Meta?
-				// 这里比较 tricky，严格来说应该看是否只有两个 struct 参数
+	if len(results) == 2 {
+		info.HasReturn = true // (Res, error)
+		info.ResType = exprToString(results[0].Type)
+	} else {
+		info.HasReturn = false // (error)
+	}
+
+	// 2. 分析参数
+	params := fn.Type.Params.List
+	args := make([]*ast.Field, 0, len(params))
+	for _, p := range params {
+		if len(p.Names) > 1 {
+			for range p.Names {
+				args = append(args, p)
 			}
-			isMeta = true
-		}
-
-		// 如果已经是 Req 了，那这个肯定不是 Meta
-		if info.ReqType != "" {
-			isMeta = false
-		}
-
-		if isMeta && info.MetaType == "" {
-			info.MetaType = typeStr
 		} else {
-			// 默认为 Request
-			info.ReqType = typeStr
-			if _, ok := field.Type.(*ast.StarExpr); ok {
-				info.IsPointer = true
-			}
+			args = append(args, p)
 		}
 	}
 
-	// 修正：如果只有一个参数，且被误判为 Meta，强制改为 Req
-	if info.ReqType == "" && info.MetaType != "" {
-		info.ReqType = info.MetaType
-		info.MetaType = ""
+	if len(args) == 0 {
+		return info, false
 	}
 
-	// 分析返回值
-	if fn.Type.Results != nil {
-		for _, field := range fn.Type.Results.List {
-			typeStr := exprToString(field.Type)
-			if typeStr != "error" {
-				info.ResType = typeStr
-				info.HasReturn = true
-			}
+	// 检查 Context
+	firstType := exprToString(args[0].Type)
+	if strings.Contains(firstType, "Context") {
+		info.HasCtx = true
+		args = args[1:]
+	}
+
+	if len(args) == 0 || len(args) > 2 {
+		return info, false
+	}
+
+	if len(args) == 2 {
+		// [Meta, Req]
+		info.MetaType = exprToString(args[0].Type)
+		info.ReqType = exprToString(args[1].Type)
+		if _, ok := args[1].Type.(*ast.StarExpr); ok {
+			info.IsPointer = true
+		}
+	} else if len(args) == 1 {
+		// [Req]
+		info.ReqType = exprToString(args[0].Type)
+		if _, ok := args[0].Type.(*ast.StarExpr); ok {
+			info.IsPointer = true
 		}
 	}
 
-	return info
+	return info, true
 }
 
 func exprToString(expr ast.Expr) string {
@@ -164,7 +237,7 @@ func exprToString(expr ast.Expr) string {
 	return buf.String()
 }
 
-func generateCode(pkg, strct string, methods []MethodInfo) []byte {
+func generateCode(pkg string, structs []StructInfo) []byte {
 	tpl := `// Code generated by gencrpcserverv3. DO NOT EDIT.
 package {{.Package}}
 
@@ -174,19 +247,16 @@ import (
 	"github.com/ndsky1003/crpc/v3/coder"
 )
 
-func (c *{{.Struct}}) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaBytes, bodyBytes []byte) (any, error) {
+{{- range .Structs}}
+
+func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaBytes, bodyBytes []byte) (any, error) {
 	switch method {
 	{{- range .Methods}}
 	case "{{.Name}}":
-		var req {{.ReqTypeClean}}
-		{{- if .HasCtx }}
-		// ctx is passed from arguments
-		{{- end}}
-		
+		var req {{ReqTypeClean .}}
 		{{- if .MetaType}}
-		var meta {{.MetaTypeClean}}
+		var meta {{MetaTypeClean .}}
 		{{- end}}
-
 		if err := coder.Unmarshal(reqCoderT, bodyBytes, &req); err != nil {
 			return nil, err
 		}
@@ -198,19 +268,27 @@ func (c *{{.Struct}}) HandleMsg(ctx context.Context, method string, metaCoderT c
 		}
 		{{- end}}
 
+		{{- if .HasReturn}}
 		return c.{{.Name}}(
 			{{- if .HasCtx}}ctx, {{end}}
 			{{- if .MetaType}}{{if isPointer .MetaType}}&{{end}}meta, {{end}}
-			{{if isPointer .ReqType}}&{{end}}req,
+			{{- if isPointer .ReqType}}&{{end}}req,
 		)
+		{{- else}}
+		return nil, c.{{.Name}}(
+			{{- if .HasCtx}}ctx, {{end}}
+			{{- if .MetaType}}{{if isPointer .MetaType}}&{{end}}meta, {{end}}
+			{{- if isPointer .ReqType}}&{{end}}req,
+		)
+		{{- end}}
 	{{- end}}
 	default:
 		return nil, errors.New("unknown method: " + method)
 	}
 }
+{{- end}}
 `
 
-	// 辅助函数：清理类型字符串（去除 *）以便 new
 	funcMap := template.FuncMap{
 		"ReqTypeClean": func(m MethodInfo) string {
 			return strings.TrimPrefix(m.ReqType, "*")
@@ -227,18 +305,16 @@ func (c *{{.Struct}}) HandleMsg(ctx context.Context, method string, metaCoderT c
 	var buf bytes.Buffer
 	err := t.Execute(&buf, map[string]interface{}{
 		"Package": pkg,
-		"Struct":  strct,
-		"Methods": methods,
+		"Structs": structs,
 	})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Template execute error: %v", err)
 	}
 
-	// 格式化代码
 	src, err := format.Source(buf.Bytes())
 	if err != nil {
-		fmt.Println(buf.String()) // 打印出错的代码以便调试
-		log.Fatal("format error:", err)
+		fmt.Println(buf.String())
+		log.Fatalf("Format error: %v", err)
 	}
 	return src
 }
