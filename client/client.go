@@ -93,7 +93,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(*this.opt.VerifyJwtExpire)),
 		},
 	}
-	ss, err := jwt.NewWithClaims(jwt.SigningMethodHS256, payload).SignedString(secret)
+	ss, err := jwt.NewWithClaims(jwt.SigningMethodHS256, payload).SignedString([]byte(secret))
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
@@ -223,12 +223,16 @@ func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) e
 	isBroadcast := h.Type == headertype.BroadcastRes
 
 	if isBroadcast {
+		d := &broadcastResult{rawBody: body, resCoderT: h.ResCoderT, code: h.Code, IsEOS: h.Flags.IsEOS()}
 		select {
-		case call.broadcastCh <- broadcastResult{rawBody: body, resCoderT: h.ResCoderT, code: h.Code}:
+		case call.broadcastCh <- d:
 		case <-call.ctx.Done():
 			// [安全保护] 消费者已死 (可能用户取消了，或者并发的其他 EOS 导致退出了)
 			// 此时直接丢弃消息，不阻塞，也不 panic
 			return nil
+		default:
+			//允许丢包,防止客户端阻塞死了
+			log.Printf("err:%+v", d)
 		}
 		if h.Flags.IsEOS() {
 			shouldFinish = true
@@ -479,19 +483,19 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 			if res.code.IsOK() {
 				reply = call.BroadcaseResNewFunc()
 				if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
-					call.BroadcaseResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()))
+					call.BroadcaseResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
 					return
 				}
 			} else {
 				resErr = &errors.Error{}
 				if err := coder.Unmarshal(coder.Msgp, res.rawBody, resErr); err != nil {
 					// 无法解析错误信息，构造一个通用错误
-					call.BroadcaseResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()))
+					call.BroadcaseResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
 					return
 				}
 			}
 
-			cont := call.BroadcaseResCallBack(reply, resErr)
+			cont := call.BroadcaseResCallBack(reply, resErr, res.IsEOS)
 			if !cont {
 				// 用户决定停止接收
 				return
@@ -506,15 +510,12 @@ func (c *Client) parseModuleFunc(raw string) (module, function string, err error
 		return "", "", fmt.Errorf("%w: input is empty", errors.ModuleFuncError)
 	}
 
-	before, after, found := strings.Cut(raw, ".")
-
-	if !found {
+	// before, after, found := strings.Cut(raw, ".")
+	idx := strings.LastIndex(raw, ".")
+	if idx == -1 {
 		return "", "", fmt.Errorf("%w: missing dot separator in '%s'", errors.ModuleFuncError, raw)
 	}
-
-	if before == "" || after == "" {
-		return "", "", fmt.Errorf("%w: invalid format '%s', expect 'module.function'", errors.ModuleFuncError, raw)
-	}
-
-	return before, after, nil
+	module = raw[:idx]
+	function = raw[idx+1:]
+	return module, function, nil
 }

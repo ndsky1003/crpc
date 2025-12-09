@@ -290,6 +290,9 @@ func (s *server_mgr) route(srcSess server.Session, h *header.Header, meta, body 
 				// 如果是最后一个响应，打上 EOS 标记
 				if remain <= 0 {
 					h.Flags.Add(headerflags.EOS)
+					if item.timer != nil {
+						item.timer.Stop()
+					}
 					s.broadcastCounter.Delete(key) // 任务完成，清理内存
 				}
 			}
@@ -327,29 +330,19 @@ func (s *server_mgr) replyError(srcSess server.Session, reqH *header.Header, cod
 	h.Code = code
 	h.Seq = reqH.Seq
 	h.ResCoderT = coder.Msgp // 错误信息默认用 Msgp
+	defer h.Release()
 
-	// 构造 protocol/errors.Error
-	// 注意：这里需要依赖 protocol/errors 包
-	// 假设使用 crpc/v3/protocol/errors
-	// 这里简单构造一个符合 Msgp 序列化的错误对象，或者直接发 String
-	// 根据 client.sendReply 的逻辑，这里应该发送一个 *errors.Error
+	rpcErr := errors.New(errors.ServerInternal, errMsg)
+	body, err := coder.Marshal(coder.Msgp, rpcErr)
+	if err != nil {
+		return err
+	}
 
-	// 由于这部分代码未完全暴露，这里模拟发送一个通用错误结构
-	// 如果你有 import "github.com/ndsky1003/crpc/v3/protocol/errors"
-	// rpcErr := errors.New(uint16(code), errMsg)
-	// body, _ := coder.Marshal(coder.Msgp, rpcErr)
+	// 3. 发送
+	packet, err := protocol.Pack(h, nil, body)
+	if err != nil {
+		return err
+	}
+	return srcSess.Sends(context.Background(), packet)
 
-	// 简化版：直接发 String，但 Client 端可能期望的是 Error Struct
-	// 为了健壮性，这里建议确保 client 能解析。
-	// 假设 Client 端 handleRes -> Unmarshal(coder.Msgp, body, &resErr)
-
-	// 手动构建一个兼容 map[string]interface{} 或者 Error 结构的 bytes
-	// 这里为了编译通过，发送空 body 或者简单的错误描述
-	// 实际项目中应引入 errors 包
-
-	// 模拟错误 Body (Msgp map: {"c": code, "m": errMsg})
-	// 这里略过手动拼 Msgp 字节码的复杂过程
-
-	h.Release() // 记得释放
-	return nil
 }

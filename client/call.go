@@ -12,6 +12,7 @@ type broadcastResult struct {
 	rawBody   []byte       // 原始数据
 	resCoderT coder.T      // 编码类型
 	code      headercode.T // 是否成功
+	IsEOS     bool         // 是否是结束标志
 }
 
 type Call struct {
@@ -19,12 +20,12 @@ type Call struct {
 	Reply any
 	Error error
 
-	BroadcaseResNewFunc  func() any            // 用于广播调用时创建返回值对象
-	BroadcaseResCallBack func(any, error) bool // 返回true表示继续广播,返回false表示停止广播
+	BroadcaseResNewFunc  func() any                              // 用于广播调用时创建返回值对象
+	BroadcaseResCallBack func(ret any, err error, eos bool) bool // 返回true表示继续广播,返回false表示停止广播
 
 	// [新增] 广播专用缓冲通道
 	// 网络层 -> 写入 -> 业务协程读取 -> 执行回调
-	broadcastCh chan broadcastResult
+	broadcastCh chan *broadcastResult
 
 	// [新增] 用于控制广播消费协程退出的 Context
 	ctx    context.Context
