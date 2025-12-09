@@ -37,6 +37,7 @@ type Client struct {
 func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err error) {
 	opt := Options().
 		SetWeight(10).
+		SetSecret("8620506fd4781174ec05fcacf816a12e").
 		SetVerifyJwtExpire(5 * time.Second).
 		SetDebug(false).
 		SetMetaCoderT(coder.JSON).
@@ -110,7 +111,9 @@ func (this *Client) onConnected(c *conn.Conn) error {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
 	h.Release()
-	// 等待验证响应
+
+	// 等待验证响应 -----------------------------------------------
+
 	respData, err := c.Read()
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
@@ -132,7 +135,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	if err := coder.Unmarshal(coder.Msgp, claim.Data, &resp); err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
-	if res_h.Code.IsOK() {
+	if res_h.Type == headertype.VerifyRes && res_h.Code.IsOK() {
 		this.UUID = resp.UUID
 		return nil
 	}

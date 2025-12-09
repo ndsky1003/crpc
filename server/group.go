@@ -7,14 +7,14 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/ndsky1003/net/conn"
+	"github.com/ndsky1003/net/server"
 )
 
 // Session 包装 net 连接
 type Session struct {
-	Sid    string
+	Name   string
 	Weight int
-	Conn   *conn.Conn
+	server.Session
 }
 
 // ServiceGroup 管理同名服务的多个连接
@@ -43,15 +43,32 @@ func NewServiceGroup(name string) *ServiceGroup {
 	}
 }
 
-// Add 添加连接并更新哈希环
 func (sg *ServiceGroup) Add(s *Session) {
 	sg.Lock()
 	defer sg.Unlock()
+
+	// --- 修复开始 ---
+	// 先检查是否已存在，避免重复添加导致权重计算错误
+	for i, existing := range sg.Sessions {
+		if existing.ID() == s.ID() {
+			// 如果已存在，更新权重和连接，而不是追加
+			if existing.Weight > 0 {
+				sg.TotalWeight -= existing.Weight
+			}
+			sg.Sessions[i] = s // 更新
+			if s.Weight > 0 {
+				sg.TotalWeight += s.Weight
+			}
+			sg.rebuildHashRing() // 权重变了，需要重建
+			return
+		}
+	}
+	// --- 修复结束 ---
+
 	sg.Sessions = append(sg.Sessions, s)
 	if s.Weight > 0 {
 		sg.TotalWeight += s.Weight
 	}
-	// 重建哈希环
 	sg.rebuildHashRing()
 }
 
@@ -60,7 +77,7 @@ func (sg *ServiceGroup) Remove(sid string) {
 	sg.Lock()
 	defer sg.Unlock()
 	for i, s := range sg.Sessions {
-		if s.Sid == sid {
+		if s.ID().String() == sid {
 			if s.Weight > 0 {
 				sg.TotalWeight -= s.Weight
 			}
@@ -88,9 +105,9 @@ func (sg *ServiceGroup) rebuildHashRing() {
 		numVirtualNodes := s.Weight * sg.replicas
 		for i := 0; i < numVirtualNodes; i++ {
 			// 生成虚拟节点 Key: sid#0, sid#1 ...
-			hash := crc32.ChecksumIEEE([]byte(s.Sid + "#" + strconv.Itoa(i)))
+			hash := crc32.ChecksumIEEE([]byte(s.ID().String() + "#" + strconv.Itoa(i)))
 			sg.keys = append(sg.keys, hash)
-			sg.hashMap[hash] = s.Sid
+			sg.hashMap[hash] = s.ID().String()
 		}
 	}
 	// 排序，方便二分查找
@@ -165,7 +182,7 @@ func (sg *ServiceGroup) GetBySid(sid string) *Session {
 // 内部无锁查找，复用代码
 func (sg *ServiceGroup) getBySidNoLock(sid string) *Session {
 	for _, s := range sg.Sessions {
-		if s.Sid == sid {
+		if s.ID().String() == sid {
 			return s
 		}
 	}

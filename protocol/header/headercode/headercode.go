@@ -10,6 +10,7 @@ const (
 	FailedServerPanic              // 服务端代码炸了
 	FailedRequestTimeout           // 处理超时
 	FailedRateLimit                // 被限流了
+	FailedServiceUnavailable
 )
 
 func (t T) IsOK() bool {
