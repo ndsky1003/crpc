@@ -23,6 +23,25 @@ func (*msg_game) PlayerInfo(ctx context.Context, meta *Meta, req *PlayerInfoReq)
 	return nil, nil
 }
 
+func (*msg_game) PlayerInfo1(meta *Meta, req *PlayerInfoReq) (*PlayerInfoRes, error) {
+	return nil, nil
+}
+func (*msg_game) PlayerInfo2(req *PlayerInfoReq) (*PlayerInfoRes, error) {
+	return nil, nil
+}
+
+func (*msg_game) PlayerInfo3(ctx context.Context, meta *Meta, req *PlayerInfoReq) error {
+	return nil
+}
+
+func (*msg_game) PlayerInfo4(meta *Meta, req *PlayerInfoReq) error {
+	return nil
+}
+
+func (*msg_game) PlayerInfo5(req *PlayerInfoReq) error {
+	return nil
+}
+
 // code_gen
 func (c *msg_game) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte) (any, error) {
 	switch method {

@@ -26,8 +26,8 @@ type Option struct {
 	ResCoderT            *coder.T
 	CompressT            *compressor.T
 	Debug                *bool
-	BroadcastResNewFunc  func() any            // 用于广播调用时创建返回值对象
-	BroadcastResCallBack func(any, error) bool // 返回true表示继续广播,返回false表示停止广播
+	BroadcastResNewFunc  func() any                  // 用于广播调用时创建返回值对象
+	BroadcastResCallBack func(any, error, bool) bool // 返回true表示继续广播,返回false表示停止广播
 	client.Option
 }
 

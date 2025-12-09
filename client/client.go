@@ -361,7 +361,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 
 		// 2. 启动独立的消费协程
 		// 将 ctx 传入，以便在请求超时/取消时退出循环
-		go c.processBroadcastLoop(ctx, call)
+		go c.processBroadcastLoop(subCtx, call)
 	}
 	seq := atomic.AddUint64(&c.seq, 1)
 	h := header.Get()
