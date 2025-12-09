@@ -1,7 +1,8 @@
 package server
 
 import (
-	"hash/crc32"
+	"crypto/md5"
+	"encoding/binary"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -33,14 +34,22 @@ type ServiceGroup struct {
 	hashMap map[uint32]string
 }
 
-func NewServiceGroup(name string) *ServiceGroup {
+func NewServiceGroup(name string, replicas int) *ServiceGroup {
 	return &ServiceGroup{
 		Name:     name,
 		Sessions: make([]*Session, 0),
-		replicas: 100, // 默认倍率，可调整
+		replicas: replicas, // 默认倍率，可调整
 		keys:     nil,
 		hashMap:  make(map[uint32]string),
 	}
+}
+
+// shardingHash 生成更强的一致性哈希值 (使用 MD5)
+// 相比 CRC32，MD5 的碰撞概率极低，分布更均匀，适合一致性哈希环
+func (sg *ServiceGroup) shardingHash(key string) uint32 {
+	checksum := md5.Sum([]byte(key))
+	// 取 MD5 的前 4 个字节转为 uint32
+	return binary.BigEndian.Uint32(checksum[:4])
 }
 
 func (sg *ServiceGroup) Add(s *Session) {
@@ -105,7 +114,8 @@ func (sg *ServiceGroup) rebuildHashRing() {
 		numVirtualNodes := s.Weight * sg.replicas
 		for i := 0; i < numVirtualNodes; i++ {
 			// 生成虚拟节点 Key: sid#0, sid#1 ...
-			hash := crc32.ChecksumIEEE([]byte(s.ID().String() + "#" + strconv.Itoa(i)))
+			// 使用 MD5 替代 CRC32
+			hash := sg.shardingHash(s.ID().String() + "#" + strconv.Itoa(i))
 			sg.keys = append(sg.keys, hash)
 			sg.hashMap[hash] = s.ID().String()
 		}
@@ -126,8 +136,8 @@ func (sg *ServiceGroup) SelectByKey(key string) *Session {
 		return nil
 	}
 
-	// 1. 计算 Key 的哈希
-	hash := crc32.ChecksumIEEE([]byte(key))
+	// 1. 计算 Key 的哈希 (MD5)
+	hash := sg.shardingHash(key)
 
 	// 2. 二分查找：找到第一个 >= hash 的虚拟节点
 	idx := sort.Search(len(sg.keys), func(i int) bool {

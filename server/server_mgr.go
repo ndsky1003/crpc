@@ -31,6 +31,12 @@ type server_mgr struct {
 	broadcastCounter sync.Map
 }
 
+type broadcastCounterItem struct {
+	key   string
+	count atomic.Int32
+	timer *time.Timer
+}
+
 func (s *server_mgr) Close() error {
 	return nil
 }
@@ -52,6 +58,15 @@ func (s *server_mgr) OnDisconnect(sess server.Session, err error) error {
 	s.services.Range(func(key, value any) bool {
 		group := value.(*ServiceGroup)
 		group.Remove(sid.String())
+		return true
+	})
+
+	s.broadcastCounter.Range(func(key, value any) bool {
+		k := key.(string)
+		// key 格式 "ClientID:Seq"
+		if len(k) > len(sid.String()) && k[:len(sid.String())] == sid.String() {
+			s.broadcastCounter.Delete(k)
+		}
 		return true
 	})
 
@@ -111,7 +126,7 @@ func (s *server_mgr) handleVerify(sess server.Session, reqH *header.Header, body
 
 	// 3. 注册服务
 	// 获取或创建 ServiceGroup
-	val, _ := s.services.LoadOrStore(req.Name, NewServiceGroup(req.Name))
+	val, _ := s.services.LoadOrStore(req.Name, NewServiceGroup(req.Name, *s.opt.GroupReplicas))
 	group := val.(*ServiceGroup)
 
 	group.Add(&Session{
@@ -157,7 +172,7 @@ func (s *server_mgr) replyVerify(sess server.Session, reqH *header.Header, req *
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)), // 短期有效
 		},
 	}
-	tokenString, err := jwt.NewWithClaims(jwt.SigningMethodES256, payload).SignedString([]byte(*s.opt.Secret))
+	tokenString, err := jwt.NewWithClaims(jwt.SigningMethodHS256, payload).SignedString([]byte(*s.opt.Secret))
 	if err != nil {
 		return err
 	}
@@ -210,11 +225,29 @@ func (s *server_mgr) route(srcSess server.Session, h *header.Header, meta, body 
 				return err
 			}
 
+			timeout := 30 * time.Second //default timeout
+			deadline := h.Deadline
+			if deadline != 0 {
+				if t := time.Until(time.UnixMicro(int64(deadline))); t <= 0 {
+					return s.replyError(srcSess, h, headercode.FailedRequestTimeout, "broadcast request deadline exceeded")
+				} else {
+					timeout = t
+				}
+			}
+
 			// [新增] 初始化计数器
 			// 记录来源 ClientID 和 Seq，初始值为目标节点数量
 			count := int32(len(targets))
 			key := getBroadcastKey(srcSess.ID().String(), h.Seq)
-			s.broadcastCounter.Store(key, &count)
+			item := &broadcastCounterItem{
+				key: key,
+				timer: time.AfterFunc(timeout, func() {
+					// 超时清理，防止内存泄漏
+					s.broadcastCounter.Delete(key)
+				}),
+			}
+			item.count.Store(count)
+			s.broadcastCounter.Store(key, item)
 
 			for _, target := range targets {
 				// 异步发送，防止阻塞广播循环
@@ -250,9 +283,9 @@ func (s *server_mgr) route(srcSess server.Session, h *header.Header, meta, body 
 		if h.Type == headertype.BroadcastRes {
 			key := getBroadcastKey(tosid.String(), h.Seq)
 			if val, ok := s.broadcastCounter.Load(key); ok {
-				counter := val.(*int32)
+				item := val.(*broadcastCounterItem)
 				// 原子递减
-				remain := atomic.AddInt32(counter, -1)
+				remain := item.count.Add(-1)
 
 				// 如果是最后一个响应，打上 EOS 标记
 				if remain <= 0 {

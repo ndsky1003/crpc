@@ -34,7 +34,7 @@ type Call struct {
 	Done     chan *Call
 }
 
-func GetCall() *Call {
+func NewCall() *Call {
 	return &Call{
 		Done: make(chan *Call, 1),
 	}

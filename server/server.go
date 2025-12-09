@@ -13,6 +13,7 @@ type Server struct {
 func New(ctx context.Context, opts ...*Option) *Server {
 	opt := Options().
 		SetSecret("8620506fd4781174ec05fcacf816a12e").
+		SetGroupReplicas(100).
 		Merge(opts...)
 	s := &Server{}
 	mgr := &server_mgr{

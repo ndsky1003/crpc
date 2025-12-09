@@ -17,6 +17,7 @@ type Option struct {
 	Meta                 any
 	Name                 *string
 	Weight               *int
+	BroadcastChanCap     *int
 	Secret               *string
 	TraceID              *string
 	VerifyJwtExpire      *time.Duration
@@ -67,6 +68,11 @@ func (o *Option) SetVerifyJwtExpire(t time.Duration) *Option {
 
 func (o *Option) SetWeight(weight int) *Option {
 	o.Weight = &weight
+	return o
+}
+
+func (o *Option) SetBroadcastChanCap(a int) *Option {
+	o.BroadcastChanCap = &a
 	return o
 }
 
@@ -136,6 +142,7 @@ func (o *Option) merge(other *Option) *Option {
 	}
 	ut.ResolveOption(&o.Name, other.Name)
 	ut.ResolveOption(&o.Weight, other.Weight)
+	ut.ResolveOption(&o.BroadcastChanCap, other.BroadcastChanCap)
 	ut.ResolveOption(&o.Secret, other.Secret)
 	ut.ResolveOption(&o.TraceID, other.TraceID)
 	ut.ResolveOption(&o.VerifyJwtExpire, other.VerifyJwtExpire)

@@ -37,6 +37,7 @@ type Client struct {
 func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err error) {
 	opt := Options().
 		SetWeight(10).
+		SetBroadcastChanCap(64).
 		SetSecret("8620506fd4781174ec05fcacf816a12e").
 		SetVerifyJwtExpire(5 * time.Second).
 		SetDebug(false).
@@ -92,7 +93,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(*this.opt.VerifyJwtExpire)),
 		},
 	}
-	ss, err := jwt.NewWithClaims(jwt.SigningMethodES256, payload).SignedString(secret)
+	ss, err := jwt.NewWithClaims(jwt.SigningMethodHS256, payload).SignedString(secret)
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
@@ -315,7 +316,7 @@ func (c *Client) sendPacket(ctx context.Context, packet [][]byte, opts ...*Optio
 }
 
 func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method string, args, reply any, opts ...*Option) (call *Call) {
-	call = GetCall()
+	call = NewCall()
 	if ctx == nil {
 		call.Error = errors.New(errors.ClientInvalidArgs, "context is required")
 		call.done()
@@ -349,8 +350,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		call.BroadcaseResNewFunc = opt.BroadcastResNewFunc
 		call.BroadcaseResCallBack = opt.BroadcastResCallBack
 
-		//TODO: 修改这个硬编码
-		call.broadcastCh = make(chan broadcastResult, 64)
+		call.broadcastCh = make(chan broadcastResult, *opt.BroadcastChanCap)
 		subCtx, cancel := context.WithCancel(ctx)
 		call.ctx = subCtx
 		call.cancel = cancel
