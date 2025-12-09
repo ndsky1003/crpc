@@ -177,6 +177,12 @@ func (c *Client) HandleMsg(data []byte) error {
 
 func (c *Client) handleReq(ctx context.Context, h *header.Header, meta, body []byte) error {
 	defer h.Release()
+	if h.Deadline > 0 {
+		deadlineTime := time.UnixMicro(int64(h.Deadline))
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadlineTime)
+		defer cancel()
+	}
 	res, err := c.invoke_local_func(ctx, h.Module, h.Method, h.MetaCoderT, h.ReqCoderT, meta, body)
 	return c.sendReply(h, res, err)
 }
@@ -332,8 +338,8 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 	if tid := opt.TraceID; tid != nil {
 		traceID = *tid
 		ctx = trace.WithTraceID(ctx, traceID)
-
 	}
+
 	if ht == headertype.BroadcastReq {
 		if opt.BroadcastResNewFunc == nil || opt.BroadcastResCallBack == nil {
 			call.Error = errors.New(errors.ClientInvalidArgs, "BroadcaseResNewFunc and BroadcaseResCallBack are required for broadcast calls")
@@ -365,6 +371,12 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		SetMethod(method).
 		SetTraceID(traceID).
 		SetSeq(seq)
+
+	if deadline, ok := ctx.Deadline(); ok {
+		h.Deadline = uint64(deadline.UnixMicro())
+	} else {
+		h.Deadline = 0
+	}
 
 	isLocalCall := (c.Name == serviceName) && (ht == headertype.Req)
 	metaT := *opt.MetaCoderT

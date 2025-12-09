@@ -3,7 +3,6 @@ package header
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/ndsky1003/crpc/v3/coder"
@@ -31,9 +30,14 @@ type Header struct {
 	Module     string        //10 同上
 	Method     string        //10 同上
 	TraceID    string        //10 同上
-	Seq        uint64        //10
-	MetaLen    uint64        //10
-	BodyLen    uint64        //10
+	// [新增] 截止时间 (Unix Micro)
+	// 0 表示无限制
+	// 	v := now.UnixMicro()
+	// t := time.UnixMicro(v)
+	Deadline uint64
+	Seq      uint64 //10
+	MetaLen  uint64 //10
+	BodyLen  uint64 //10
 }
 
 const (
@@ -97,6 +101,11 @@ func (this *Header) SetSeq(s uint64) *Header {
 	return this
 }
 
+func (this *Header) SetDeadline(s uint64) *Header {
+	this.Deadline = s
+	return this
+}
+
 func (this *Header) SetMataLen(s uint64) *Header {
 	this.MetaLen = s
 	return this
@@ -136,6 +145,7 @@ func (r *Header) Marshal() ([]byte, error) {
 	size += varintStrSize(r.Method)
 	size += varintStrSize(r.TraceID)
 
+	size += uvarintSize(r.Deadline)
 	size += uvarintSize(r.Seq)
 	size += uvarintSize(r.MetaLen)
 	size += uvarintSize(r.BodyLen)
@@ -177,6 +187,8 @@ func (r *Header) Marshal() ([]byte, error) {
 
 	idx += writeString(header[idx:], r.TraceID)
 
+	idx += binary.PutUvarint(header[idx:], r.Deadline)
+
 	idx += binary.PutUvarint(header[idx:], r.Seq)
 
 	idx += binary.PutUvarint(header[idx:], r.MetaLen)
@@ -192,12 +204,6 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 		return errors.New("header too short")
 	}
 
-	// 捕获潜在的 bounds check panic
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("malformed header: %v", r)
-		}
-	}()
 	idx, size := 0, 0
 
 	r.Type = headertype.T(data[idx])
@@ -231,16 +237,31 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 		r.UUID = uuid.Nil
 	}
 
-	r.ToService, size = readString(data[idx:])
+	r.ToService, size, err = readString(data[idx:])
 	idx += size
+	if err != nil {
+		return err
+	}
 
-	r.Module, size = readString(data[idx:])
+	r.Module, size, err = readString(data[idx:])
 	idx += size
+	if err != nil {
+		return err
+	}
 
-	r.Method, size = readString(data[idx:])
+	r.Method, size, err = readString(data[idx:])
 	idx += size
+	if err != nil {
+		return err
+	}
 
-	r.TraceID, size = readString(data[idx:])
+	r.TraceID, size, err = readString(data[idx:])
+	idx += size
+	if err != nil {
+		return err
+	}
+
+	r.Deadline, size = binary.Uvarint(data[idx:])
 	idx += size
 
 	r.Seq, size = binary.Uvarint(data[idx:])
@@ -276,6 +297,7 @@ func (r *Header) reset() {
 	r.Module = ""
 	r.Method = ""
 	r.TraceID = ""
+	r.Deadline = 0
 	r.Seq = 0
 	r.MetaLen = 0
 	r.BodyLen = 0
@@ -303,18 +325,21 @@ func varintStrSize(s string) int {
 	return uvarintSize(uint64(len(s))) + len(s)
 }
 
-func readString(b []byte) (string, int) {
+func readString(b []byte) (string, int, error) {
 	l, n := binary.Uvarint(b)
 	if n <= 0 {
-		panic("invalid varint len") // defer 会捕获
+		err := errors.New("invalid varint len") // defer 会捕获
+		return "", 0, err
 	}
 	if uint64(len(b[n:])) < l {
-		panic("buffer too short for string")
+		err := errors.New("buffer too short for string") // defer 会捕获
+		return "", 0, err
 	}
 	if l > MaxStringLen {
-		panic("string too long") // 安全防御
+		err := errors.New("string too long") // defer 会捕获
+		return "", 0, err
 	}
-	return string(b[n : n+int(l)]), n + int(l)
+	return string(b[n : n+int(l)]), n + int(l), nil
 }
 
 func writeString(b []byte, s string) int {

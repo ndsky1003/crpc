@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -13,6 +14,7 @@ import (
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
 	"github.com/ndsky1003/crpc/v3/protocol/header"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headercode"
+	"github.com/ndsky1003/crpc/v3/protocol/header/headerflags"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
 	"github.com/ndsky1003/net/logger"
 	"github.com/ndsky1003/net/server"
@@ -22,6 +24,11 @@ type server_mgr struct {
 	opt       *Option
 	services  sync.Map // map[string]*ServiceGroup (服务名 -> 服务组)
 	connCache sync.Map // map[uuid.UUID]*conn.Conn (临时存储连接)
+
+	// [新增] 广播计数器
+	// Key: string (格式 "ClientID:Seq")
+	// Value: *int32 (剩余等待的响应数)
+	broadcastCounter sync.Map
 }
 
 func (s *server_mgr) Close() error {
@@ -60,6 +67,20 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		return fmt.Errorf("unpack error: %v", err)
 	}
 	defer h.Release()
+
+	if h.Type.IsReq() {
+		if h.Deadline > 0 {
+			now := uint64(time.Now().UnixMicro())
+			if now >= h.Deadline {
+				// 超时了！记录日志，直接丢弃，或者回一个 Timeout 错误包
+				logger.Warnf("Request %d dropped due to timeout. Deadline: %d, Now: %d", h.Seq, h.Deadline, now)
+
+				// 可选：回包告知 Client 已超时（虽然 Client 可能已经不等了，但为了协议完整性建议回）
+				s.replyError(sess, h, headercode.FailedRequestTimeout, "server-side timeout deadline exceeded")
+				return nil
+			}
+		}
+	}
 
 	// 2. 处理鉴权请求 (VerifyReq)
 	if h.Type == headertype.VerifyReq {
@@ -189,6 +210,12 @@ func (s *server_mgr) route(srcSess server.Session, h *header.Header, meta, body 
 				return err
 			}
 
+			// [新增] 初始化计数器
+			// 记录来源 ClientID 和 Seq，初始值为目标节点数量
+			count := int32(len(targets))
+			key := getBroadcastKey(srcSess.ID().String(), h.Seq)
+			s.broadcastCounter.Store(key, &count)
+
 			for _, target := range targets {
 				// 异步发送，防止阻塞广播循环
 				// 注意：这里 packet 是共享内存，Send 内部如果是异步写入 buffer 是安全的
@@ -211,9 +238,31 @@ func (s *server_mgr) route(srcSess server.Session, h *header.Header, meta, body 
 		tosid := h.UUID
 		target, ok := s.connCache.Load(tosid)
 		if !ok {
+			// 如果客户端掉线，记得清理计数器防止内存泄漏
+			if h.Type == headertype.BroadcastRes {
+				key := getBroadcastKey(tosid.String(), h.Seq)
+				s.broadcastCounter.Delete(key)
+			}
 			return fmt.Errorf("target session %s not found for response", tosid)
 		}
 		targetSess := target.(server.Session)
+		// [新增] 广播响应的拦截处理
+		if h.Type == headertype.BroadcastRes {
+			key := getBroadcastKey(tosid.String(), h.Seq)
+			if val, ok := s.broadcastCounter.Load(key); ok {
+				counter := val.(*int32)
+				// 原子递减
+				remain := atomic.AddInt32(counter, -1)
+
+				// 如果是最后一个响应，打上 EOS 标记
+				if remain <= 0 {
+					h.Flags.Add(headerflags.EOS)
+					s.broadcastCounter.Delete(key) // 任务完成，清理内存
+				}
+			}
+			// 注意：如果重启了 Server 或者超时清理了 Map，
+			// 可能会导致 EOS 丢失，Client 会依赖超时机制兜底。
+		}
 		return s.forward(targetSess, h, meta, body)
 
 	}
