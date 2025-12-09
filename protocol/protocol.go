@@ -3,11 +3,23 @@ package protocol
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 
 	"github.com/ndsky1003/crpc/v3/protocol/header"
 )
 
-// Pack 打包消息: HeaderLen(2) + Header + Meta + Body
+// MagicNumber 用于协议识别 (ASCII 'C' 'R')
+// 防止非法连接导致内存分配异常
+const MagicNumber uint16 = 0x4352
+
+var (
+	ErrPacketTooShort = errors.New("packet too short")
+	ErrMagicMismatch  = errors.New("magic number mismatch")
+	ErrHeaderTooLarge = errors.New("header too large")
+	ErrIncomplete     = errors.New("packet incomplete")
+)
+
+// Pack 打包消息: Magic(2) + HeaderLen(2) + Header + Meta + Body
 func Pack(h *header.Header, meta []byte, body []byte) ([][]byte, error) {
 	h.MetaLen = uint64(len(meta))
 	h.BodyLen = uint64(len(body))
@@ -18,11 +30,17 @@ func Pack(h *header.Header, meta []byte, body []byte) ([][]byte, error) {
 	}
 
 	if len(headBytes) > 65535 {
-		return nil, errors.New("header too large")
+		return nil, ErrHeaderTooLarge
 	}
 
-	first_bytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(first_bytes[0:2], uint16(len(headBytes)))
+	// 申请 4 个字节：2字节魔数 + 2字节头长度
+	first_bytes := make([]byte, 4)
+
+	// 1. 写入魔数
+	binary.BigEndian.PutUint16(first_bytes[0:2], MagicNumber)
+	// 2. 写入 Header 长度
+	binary.BigEndian.PutUint16(first_bytes[2:4], uint16(len(headBytes)))
+
 	res := make([][]byte, 4)
 	res[0] = first_bytes
 	res[1] = headBytes
@@ -33,44 +51,67 @@ func Pack(h *header.Header, meta []byte, body []byte) ([][]byte, error) {
 
 // Unpack 解包
 func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
-	if len(data) < 2 {
-		return nil, nil, nil, errors.New("packet too short")
+	// 最小长度变为 4 (Magic + Len)
+	if len(data) < 4 {
+		return nil, nil, nil, ErrPacketTooShort
 	}
 
-	headLen := uint64(binary.BigEndian.Uint16(data[0:2]))
-	if len(data) < int(2+headLen) {
-		return nil, nil, nil, errors.New("header incomplete")
+	// 1. 校验魔数
+	magic := binary.BigEndian.Uint16(data[0:2])
+	if magic != MagicNumber {
+		return nil, nil, nil, fmt.Errorf("%w: read %x, expect %x", ErrMagicMismatch, magic, MagicNumber)
 	}
+
+	// 2. 读取 Header 长度
+	headLen := uint64(binary.BigEndian.Uint16(data[2:4]))
+
+	// 校验数据总长度是否足够容纳 Header
+	if len(data) < int(4+headLen) {
+		return nil, nil, nil, ErrIncomplete
+	}
+
 	h := header.Get()
-	header_bytes := data[2 : 2+headLen]
+	// Header 数据从第 4 个字节开始
+	header_bytes := data[4 : 4+headLen]
 	if err := h.Unmarshal(header_bytes); err != nil {
 		h.Release()
 		return nil, nil, nil, err
 	}
 
-	totalLen := int(2 + headLen + h.MetaLen + h.BodyLen)
+	// 3. 校验完整包长度
+	totalLen := int(4 + headLen + h.MetaLen + h.BodyLen)
 	if len(data) < totalLen {
 		h.Release()
-		return nil, nil, nil, errors.New("packet incomplete")
+		return nil, nil, nil, ErrIncomplete
 	}
 
-	meta := data[2+headLen : 2+headLen+h.MetaLen]
-	body := data[2+headLen+h.MetaLen : totalLen]
-	return h, meta, body, nil
+	metaStart := 4 + headLen
+	metaEnd := metaStart + h.MetaLen
+	meta := data[metaStart:metaEnd]
+	body := data[metaEnd:totalLen]
 
+	return h, meta, body, nil
 }
 
+// PeekHeader 仅查看头部信息（用于路由等），不完整解包
 func PeekHeader(data []byte) (*header.Header, error) {
-	if len(data) < 2 {
-		return nil, errors.New("packet too short")
+	if len(data) < 4 {
+		return nil, ErrPacketTooShort
 	}
-	headLen := binary.BigEndian.Uint16(data[0:2])
-	if len(data) < int(2+headLen) {
-		return nil, errors.New("header incomplete")
+
+	// 1. 校验魔数
+	magic := binary.BigEndian.Uint16(data[0:2])
+	if magic != MagicNumber {
+		return nil, fmt.Errorf("%w: read %x", ErrMagicMismatch, magic)
+	}
+
+	headLen := binary.BigEndian.Uint16(data[2:4])
+	if len(data) < int(4+headLen) {
+		return nil, ErrIncomplete
 	}
 
 	h := header.Get()
-	header_bytes := data[2 : 2+headLen]
+	header_bytes := data[4 : 4+headLen]
 	if err := h.Unmarshal(header_bytes); err != nil {
 		h.Release()
 		return nil, err

@@ -65,6 +65,9 @@ func (s *server_mgr) OnDisconnect(sess server.Session, err error) error {
 		k := key.(string)
 		// key 格式 "ClientID:Seq"
 		if len(k) > len(sid.String()) && k[:len(sid.String())] == sid.String() {
+			if item, ok := value.(*broadcastCounterItem); ok && item.timer != nil {
+				item.timer.Stop() // 显式停止定时器
+			}
 			s.broadcastCounter.Delete(k)
 		}
 		return true

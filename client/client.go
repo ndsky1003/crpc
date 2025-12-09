@@ -215,9 +215,6 @@ func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) e
 	}
 	call := val.(*Call)
 
-	// 标记该次调用是否应该结束（从 Map 移除 + Close Channel）
-	shouldFinish := false
-
 	// 2. 统一处理逻辑，减少重复代码
 	// 无论是 OK 还是 Error，如果是广播，流程都很像
 	isBroadcast := h.Type == headertype.BroadcastRes
@@ -235,10 +232,14 @@ func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) e
 			log.Printf("err:%+v", d)
 		}
 		if h.Flags.IsEOS() {
-			shouldFinish = true
+			c.pending.Delete(seq)
+			call.done()
 		}
 	} else {
-		shouldFinish = true
+		defer func() {
+			c.pending.Delete(seq)
+			call.done()
+		}()
 		if h.Code.IsOK() {
 			if call.Reply != nil {
 				if err := coder.Unmarshal(h.ResCoderT, body, call.Reply); err != nil {
@@ -253,12 +254,6 @@ func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) e
 				call.Error = &resErr
 			}
 		}
-	}
-	// 4. 统一收尾
-	if shouldFinish {
-		// 只有在真正结束时，才从 Map 中移除
-		c.pending.Delete(seq)
-		call.done()
 	}
 
 	return nil
