@@ -79,8 +79,8 @@ func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
 	}
 
 	// 3. 校验完整包长度
-	totalLen := int(4 + headLen + h.MetaLen + h.BodyLen)
-	if len(data) < totalLen {
+	totalLen := uint64(4+headLen) + h.MetaLen + h.BodyLen
+	if uint64(len(data)) < totalLen {
 		h.Release()
 		return nil, nil, nil, ErrIncomplete
 	}

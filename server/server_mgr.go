@@ -29,6 +29,8 @@ type server_mgr struct {
 	once             sync.Once
 	broadcastCounter *broadcastCounterAll //tcpid -> seq -> *broadcastCounterItem (广播请求计数器)
 	workPool         *ants.Pool
+
+	sidGroupIndex sync.Map
 }
 
 func (s *server_mgr) Close() error {
@@ -53,12 +55,12 @@ func (s *server_mgr) OnDisconnect(sess server.Session, err error) error {
 	sid := sess.ID()
 	s.connCache.Delete(sid)
 
-	// 遍历所有服务组，移除该连接
-	s.services.Range(func(key, value any) bool {
-		group := value.(*ServiceGroup)
-		group.Remove(sid.String())
-		return true
-	})
+	if groupNameVal, ok := s.sidGroupIndex.LoadAndDelete(sid); ok {
+		groupName := groupNameVal.(string)
+		if gVal, ok := s.services.Load(groupName); ok {
+			gVal.(*ServiceGroup).Remove(sid.String())
+		}
+	}
 
 	//不清理,有可能连接上来,因为重连上来id不会变
 	// broadcastCounter
@@ -112,13 +114,13 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		}
 	}
 	if err = s.workPool.Submit(task); err != nil {
+		h.Release()
+		copy_meta.Release()
+		copy_body.Release()
 		if err == ants.ErrPoolOverload {
-			h.Release()
-			copy_meta.Release()
-			copy_body.Release()
 			return errors.New(errors.ServerInternal, "server busy")
 		}
-		return err
+		return errors.New(errors.ServerInternal, err.Error())
 	}
 	return nil
 }
@@ -149,8 +151,10 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 	if h.Flags.IsBroadcast() {
 		targets := group.GetAll()
 		if len(targets) == 0 {
-			// 广播如果没人在线，通常不需要报错，或者报 warning
-			return nil
+			if h.Type == headertype.Req { //send 不需要回
+				h.Flags.With(headerflags.EOS)
+			}
+			return s.replyError(sess, h, errors.New(errors.ServerServiceUnavailable, "无可广播的对象"))
 		}
 		count := int32(len(targets))
 		s.broadcastCounter.setBroadcastCount(sess.ID(), h.Seq, count, timeout)
@@ -160,9 +164,17 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 			return err
 		}
 		for _, target := range targets {
-			go target.Sends(context.Background(), packet, server.Options().WithConn(func(o *conn.Option) {
-				o.SetWriteTimeout(timeout)
-			}))
+			task := func() {
+				target.Sends(context.Background(), packet, server.Options().WithConn(func(o *conn.Option) {
+					o.SetWriteTimeout(timeout)
+				}))
+			}
+			if err = s.workPool.Submit(task); err != nil {
+				if err == ants.ErrPoolOverload {
+					return errors.New(errors.ServerInternal, "server busy")
+				}
+				return errors.New(errors.ServerInternal, err.Error())
+			}
 		}
 		return nil
 	}
@@ -189,6 +201,7 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, meta, body []
 		if remain := s.broadcastCounter.decreaseBroadcastCount(tosid, h.Seq); remain <= 0 {
 			h.Flags.Add(headerflags.EOS)
 		}
+		//NOTE:
 		// 注意：如果重启了 Server 或者超时清理了 Map，
 		// 可能会导致 EOS 丢失，Client 会依赖超时机制兜底。
 	}
@@ -223,6 +236,8 @@ func (s *server_mgr) handleVerify(sess server.Session, reqH *header.Header, body
 		Weight:  req.Weight,
 		Session: sess,
 	})
+
+	s.sidGroupIndex.Store(sess.ID(), req.Name)
 
 	logger.Infof("Service Registered: %s [Sid:%s, Weight:%d]", req.Name, sess.ID(), req.Weight)
 
