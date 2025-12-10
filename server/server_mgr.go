@@ -226,7 +226,14 @@ func (s *server_mgr) handleVerify(sess server.Session, reqH *header.Header, body
 		return s.replyVerify(sess, reqH, nil, errors.Newf(errors.ServerInternal, "unmarshal verify req failed: %v", err))
 	}
 
-	// 3. 注册服务
+	if oldGroupVal, loaded := s.sidGroupIndex.Load(sess.ID()); loaded {
+		oldGroupName := oldGroupVal.(string)
+		if oldGroupName != req.Name { // 如果名字变了，说明切换了身份
+			if gVal, ok := s.services.Load(oldGroupName); ok {
+				gVal.(*ServiceGroup).Remove(sess.ID().String())
+			}
+		}
+	}
 	// 获取或创建 ServiceGroup
 	val, _ := s.services.LoadOrStore(req.Name, NewServiceGroup(req.Name, *s.opt.GroupReplicas))
 	group := val.(*ServiceGroup)

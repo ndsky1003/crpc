@@ -27,7 +27,7 @@ const (
 
 // remote
 const (
-	RemoteInternal     T = 600 //远程内部错误
-	RemoteTimeout      T = 601 //远程超时错误
-	RemoteStadardError T = 699 //远程标准错误
+	RemoteInternal      T = 600 //远程内部错误
+	RemoteTimeout       T = 601 //远程超时错误
+	RemoteStandardError T = 699 //远程标准错误
 )

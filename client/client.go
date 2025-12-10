@@ -232,7 +232,7 @@ func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) err
 			return nil
 		default:
 			//允许丢包,防止客户端阻塞死了
-			log.Printf("err:%+v", d)
+			log.Printf("seq:%v,service:%v:data%+v", h.Seq, h.ToService, d)
 		}
 		if h.Flags.IsEOS() {
 			c.pending.Delete(seq)
@@ -370,8 +370,8 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 			call.done()
 			return
 		}
-		call.BroadcaseResNewFunc = opt.BroadcastResNewFunc
-		call.BroadcaseResCallBack = opt.BroadcastResCallBack
+		call.BroadcastResNewFunc = opt.BroadcastResNewFunc
+		call.BroadcastResCallBack = opt.BroadcastResCallBack
 
 		call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
 		subCtx, cancel := context.WithCancel(ctx)
@@ -475,28 +475,28 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 				// Channel 被 handleRes 关闭 (EOS)，说明流结束
 				return
 			}
-			if call.BroadcaseResNewFunc == nil || call.BroadcaseResCallBack == nil {
+			if call.BroadcastResNewFunc == nil || call.BroadcastResCallBack == nil {
 				// 安全保护，理论上不应该发生
 				return
 			}
 			var reply any
 			var resErr error
 			if res.code.IsOK() {
-				reply = call.BroadcaseResNewFunc()
+				reply = call.BroadcastResNewFunc()
 				if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
-					call.BroadcaseResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
+					call.BroadcastResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
 					return
 				}
 			} else {
 				resErr = &errors.Error{}
 				if err := coder.Unmarshal(coder.Msgp, res.rawBody, resErr); err != nil {
 					// 无法解析错误信息，构造一个通用错误
-					call.BroadcaseResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
+					call.BroadcastResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
 					return
 				}
 			}
 
-			cont := call.BroadcaseResCallBack(reply, resErr, res.IsEOS)
+			cont := call.BroadcastResCallBack(reply, resErr, res.IsEOS)
 			if !cont {
 				// 用户决定停止接收
 				return

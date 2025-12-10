@@ -11,6 +11,7 @@ import (
 // MagicNumber 用于协议识别 (ASCII 'C' 'R')
 // 防止非法连接导致内存分配异常
 const MagicNumber uint16 = 0x4352
+const MaxPacketSize = 100 * 1024 * 1024
 
 var (
 	ErrPacketTooShort = errors.New("packet too short")
@@ -78,9 +79,19 @@ func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
 		return nil, nil, nil, err
 	}
 
-	// 3. 校验完整包长度
-	totalLen := uint64(4+headLen) + h.MetaLen + h.BodyLen
-	if uint64(len(data)) < totalLen {
+	needed := uint64(4+headLen) + h.MetaLen + h.BodyLen
+
+	if needed < h.MetaLen || needed < h.BodyLen {
+		h.Release()
+		return nil, nil, nil, ErrPacketTooShort // 或 ErrOverflow
+	}
+
+	if needed > MaxPacketSize {
+		h.Release()
+		return nil, nil, nil, ErrHeaderTooLarge
+	}
+
+	if uint64(len(data)) < needed {
 		h.Release()
 		return nil, nil, nil, ErrIncomplete
 	}
@@ -88,7 +99,7 @@ func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
 	metaStart := 4 + headLen
 	metaEnd := metaStart + h.MetaLen
 	meta := data[metaStart:metaEnd]
-	body := data[metaEnd:totalLen]
+	body := data[metaEnd:needed]
 
 	return h, meta, body, nil
 }

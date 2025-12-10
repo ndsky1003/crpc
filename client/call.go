@@ -21,8 +21,8 @@ type Call struct {
 	Error error
 
 	//broadcast 相关字段 start
-	BroadcaseResNewFunc  func() any                              // 用于广播调用时创建返回值对象
-	BroadcaseResCallBack func(ret any, err error, eos bool) bool // 返回true表示继续广播,返回false表示停止广播
+	BroadcastResNewFunc  func() any                              // 用于广播调用时创建返回值对象
+	BroadcastResCallBack func(ret any, err error, eos bool) bool // 返回true表示继续广播,返回false表示停止广播
 	broadcastCh          chan *broadcastResult
 	ctx                  context.Context
 	cancel               context.CancelFunc

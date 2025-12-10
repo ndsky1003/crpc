@@ -16,7 +16,7 @@ type Error struct {
 
 // 实现 error 接口，这样它在服务端可以被当做普通 error 返回
 func (e *Error) Error() string {
-	if e.Code == ClientStandardError || e.Code == ServerStandardError || e.Code == RemoteStadardError {
+	if e.Code == ClientStandardError || e.Code == ServerStandardError || e.Code == RemoteStandardError {
 		return e.Msg
 	}
 	return fmt.Sprintf("code=%d msg=%s", e.Code, e.Msg)
