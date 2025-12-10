@@ -21,6 +21,7 @@ const (
 	ServerInternal           T = 500 //服务器内部错误
 	ServerServiceUnavailable T = 503 //服务不可用
 	ServerDeadlineExceeded   T = 504 //网关超时
+	ServerServiceNotFound    T = 505 //服务未找到
 	ServerStandardError      T = 599 //服务器标准错误
 )
 

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"time"
+
 	"github.com/ndsky1003/crpc/v3/comm/ut"
 	"github.com/ndsky1003/net/server"
 )
@@ -12,6 +14,7 @@ func Options() *Option {
 type Option struct {
 	Secret        *string
 	GroupReplicas *int
+	SendTimeout   *time.Duration //消息上来发送给别的端点的超时时间
 	server.Option
 }
 
@@ -27,6 +30,11 @@ func (this *Option) SetSecret(s string) *Option {
 	return this
 }
 
+func (this *Option) SetSendTimeout(s time.Duration) *Option {
+	this.SendTimeout = &s
+	return this
+}
+
 func (this *Option) SetGroupReplicas(s int) *Option {
 	this.GroupReplicas = &s
 	return this
@@ -39,6 +47,7 @@ func (this *Option) merge(delta *Option) *Option {
 
 	ut.ResolveOption(&this.Secret, delta.Secret)
 	ut.ResolveOption(&this.GroupReplicas, delta.GroupReplicas)
+	ut.ResolveOption(&this.SendTimeout, delta.SendTimeout)
 
 	this.Option = this.Option.Merge(&delta.Option)
 	return this

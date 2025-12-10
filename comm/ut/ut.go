@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/ndsky1003/crpc/v3/protocol"
 )
@@ -13,7 +15,43 @@ func ResolveOption[T any](old **T, new *T) {
 	if new != nil {
 		*old = new
 	}
+}
 
+func GetEnv(key string, defaultValue string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultValue
+}
+
+// 读取 Int 类型环境变量，带默认值
+func GetEnvInt(key string, defaultValue int) int {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return defaultValue
+}
+
+// 读取 Bool 类型环境变量，带默认值 (支持 "true", "1", "TRUE" 等)
+func GetEnvBool(key string, defaultValue bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return defaultValue
+}
+
+// 读取 Duration 类型环境变量，带默认值 (支持 "5s", "100ms" 等格式)
+func GetEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return defaultValue
 }
 
 var (

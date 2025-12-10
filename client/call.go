@@ -20,16 +20,13 @@ type Call struct {
 	Reply any
 	Error error
 
+	//broadcast 相关字段 start
 	BroadcaseResNewFunc  func() any                              // 用于广播调用时创建返回值对象
 	BroadcaseResCallBack func(ret any, err error, eos bool) bool // 返回true表示继续广播,返回false表示停止广播
-
-	// [新增] 广播专用缓冲通道
-	// 网络层 -> 写入 -> 业务协程读取 -> 执行回调
-	broadcastCh chan *broadcastResult
-
-	// [新增] 用于控制广播消费协程退出的 Context
-	ctx    context.Context
-	cancel context.CancelFunc
+	broadcastCh          chan *broadcastResult
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	//broadcast 相关字段 end
 
 	finished atomic.Bool
 	Done     chan *Call
@@ -46,17 +43,12 @@ func (this *Call) done() {
 		return
 	}
 
-	// [新增] 核心修改：触发 CancelFunc
 	// 这会让 processBroadcastLoop 安全退出，而不需要关闭 channel
 	if this.cancel != nil {
 		this.cancel()
 	}
-
-	// 非阻塞发送：防止 double done 导致阻塞，或者没人读导致的泄露
 	select {
 	case this.Done <- this:
-		// 发送成功，不要 close！保留 Channel 给下次复用
 	default:
-		// 正常情况不应该走到 default，除非 buffer 满了（说明没人读）
 	}
 }

@@ -19,12 +19,14 @@ const (
 
 func (t T) String() string {
 	switch t {
+	case Raw:
+		return "Raw"
 	case JSON:
 		return "JSON"
 	case Msgp:
 		return "Msgp"
 	default:
-		return "Raw"
+		return "unknown"
 	}
 }
 

@@ -4,11 +4,11 @@ type T uint8
 
 const None T = 0
 const (
-	Debug T = 1 << iota //这条数据是否打开调试日志
-	UUID
-	EOS       //End-Of-Stream
-	Broadcast //这条是广播消息
-	Handshake //握手/鉴权
+	Debug     T = 1 << iota //这条数据是否打开调试日志
+	UUID                    //表示头文件信息里是否携带UUID,转发回路的时候需要用到,需要知道回到哪个UUID,UUID标识一个tcpid
+	EOS                     //End-Of-Stream
+	Broadcast               //这条是广播消息
+	Handshake               //握手/鉴权
 )
 
 func (f *T) Add(flag T) *T {

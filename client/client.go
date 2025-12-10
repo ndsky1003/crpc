@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/comm/trace"
+	"github.com/ndsky1003/crpc/v3/comm/ut"
 	"github.com/ndsky1003/crpc/v3/compressor"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
@@ -36,11 +37,11 @@ type Client struct {
 
 func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err error) {
 	opt := Options().
-		SetWeight(10).
-		SetBroadcastChanCap(64).
-		SetSecret("8620506fd4781174ec05fcacf816a12e").
-		SetVerifyJwtExpire(5 * time.Second).
-		SetDebug(false).
+		SetWeight(ut.GetEnvInt("CRPC_WEIGHT", 10)).
+		SetBroadcastChanCap(ut.GetEnvInt("CRPC_BROADCAST_CAP", 64)).
+		SetSecret(ut.GetEnv("CRPC_SECRET", "8620506fd4781174ec05fcacf816a12e")).
+		SetVerifyJwtExpire(ut.GetEnvDuration("CRPC_JWT_EXPIRE", 5*time.Second)).
+		SetDebug(ut.GetEnvBool("CRPC_DEBUG", false)).
 		SetMetaCoderT(coder.JSON).
 		SetReqCoderT(coder.JSON).
 		SetResCoderT(coder.JSON).
@@ -64,7 +65,7 @@ func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err erro
 		opt:  &opt,
 	}
 
-	nc, err := client.Dial(ctx, *opt.Name, addr, client.Options().
+	nc, err := client.Dial(ctx, c.Name, addr, client.Options().
 		SetHandler(c).
 		SetOnConnected(c.onConnected))
 	if err != nil {
@@ -87,10 +88,11 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
+	time_out := *this.opt.VerifyJwtExpire
 	payload := protocol.JwtClaims{
 		Data: body,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(*this.opt.VerifyJwtExpire)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time_out)),
 		},
 	}
 	ss, err := jwt.NewWithClaims(jwt.SigningMethodHS256, payload).SignedString([]byte(secret))
@@ -99,6 +101,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	}
 	h := header.Get().SetType(headertype.Req)
 	h.Flags.With(headerflags.Handshake)
+	h.Deadline = uint64(time.Now().Add(5 * time.Second).UnixMicro())
 	packets, err := protocol.Pack(h, nil, []byte(ss))
 	if err != nil {
 		h.Release()
@@ -115,8 +118,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	h.Release()
 
 	// 等待验证响应 -----------------------------------------------
-
-	respData, err := c.Read()
+	respData, err := c.Read(conn.Options().SetReadTimeout(time_out))
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
