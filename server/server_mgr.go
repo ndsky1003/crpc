@@ -39,6 +39,9 @@ func (s *server_mgr) Close() error {
 			s.broadcastCounter.Stop()
 			s.broadcastCounter = nil
 		}
+		if s.workPool != nil {
+			s.workPool.Release()
+		}
 	})
 	return nil
 }
