@@ -16,7 +16,7 @@ const MaxPacketSize = 100 * 1024 * 1024
 var (
 	ErrPacketTooShort = errors.New("packet too short")
 	ErrMagicMismatch  = errors.New("magic number mismatch")
-	ErrHeaderTooLarge = errors.New("header too large")
+	ErrPacketTooLarge = errors.New("header too large")
 	ErrIncomplete     = errors.New("packet incomplete")
 )
 
@@ -31,7 +31,7 @@ func Pack(h *header.Header, meta []byte, body []byte) ([][]byte, error) {
 	}
 
 	if len(headBytes) > 65535 {
-		return nil, ErrHeaderTooLarge
+		return nil, ErrPacketTooLarge
 	}
 
 	// 申请 4 个字节：2字节魔数 + 2字节头长度
@@ -88,7 +88,7 @@ func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
 
 	if needed > MaxPacketSize {
 		h.Release()
-		return nil, nil, nil, ErrHeaderTooLarge
+		return nil, nil, nil, ErrPacketTooLarge
 	}
 
 	if uint64(len(data)) < needed {
