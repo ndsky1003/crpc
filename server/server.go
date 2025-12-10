@@ -17,11 +17,12 @@ func New(ctx context.Context, opts ...*Option) *Server {
 		SetSecret(ut.GetEnv("CRPC_SECRET", "8620506fd4781174ec05fcacf816a12e")).
 		SetGroupReplicas(ut.GetEnvInt("GROUP_REPLICAS", 100)).
 		SetSendTimeout(30 * time.Second).
+		SetBroadcastCounterExpiration(10 * time.Second).
 		Merge(opts...)
 	s := &Server{}
 	mgr := &server_mgr{
 		opt:              &opt,
-		broadcastCounter: &broadcastCounterAll{},
+		broadcastCounter: NewBroadcastCounterAll(*opt.BroadcastCounterExpiration),
 	}
 	s.Server = server.New(ctx, mgr, &opt.Option)
 	return s

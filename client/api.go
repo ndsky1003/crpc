@@ -30,3 +30,7 @@ func (c *Client) Send(ctx context.Context, serviceName, method string, args any,
 	call := c._go(ctx, headertype.Send, serviceName, method, args, nil, opts...)
 	return call.Error
 }
+
+func (c *Client) Close() error {
+	return c.client.Close()
+}

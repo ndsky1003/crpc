@@ -22,12 +22,19 @@ import (
 
 type server_mgr struct {
 	opt              *Option
-	services         sync.Map             // map[string]*ServiceGroup (服务名 -> 服务组)
-	connCache        sync.Map             // map[uuid.UUID]*conn.Conn (临时存储连接)
+	services         sync.Map // map[string]*ServiceGroup (服务名 -> 服务组)
+	connCache        sync.Map // map[uuid.UUID]*conn.Conn (临时存储连接)
+	once             sync.Once
 	broadcastCounter *broadcastCounterAll //tcpid -> seq -> *broadcastCounterItem (广播请求计数器)
 }
 
 func (s *server_mgr) Close() error {
+	s.once.Do(func() {
+		if s.broadcastCounter != nil {
+			s.broadcastCounter.Stop()
+			s.broadcastCounter = nil
+		}
+	})
 	return nil
 }
 
