@@ -19,7 +19,7 @@ func New(ctx context.Context, opts ...*Option) *Server {
 		SetGroupReplicas(ut.GetEnvInt("GROUP_REPLICAS", 100)).
 		SetSendTimeout(30 * time.Second).
 		SetBroadcastCounterExpiration(10 * time.Second).
-		SetWorkerSize(300).
+		SetWorkerSize(5000).
 		Merge(opts...)
 	s := &Server{}
 	workPool, err := ants.NewPool(*opt.WorkerSize, ants.WithNonblocking(true))

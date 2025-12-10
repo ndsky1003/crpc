@@ -20,6 +20,7 @@ type Option struct {
 	BroadcastChanCap     *int
 	Secret               *string
 	TraceID              *string
+	HashKey              *string
 	VerifyJwtExpire      *time.Duration
 	MetaCoderT           *coder.T
 	ReqCoderT            *coder.T
@@ -65,6 +66,11 @@ func (o *Option) SetSecret(secret string) *Option {
 
 func (o *Option) SetTraceID(traceID string) *Option {
 	o.TraceID = &traceID
+	return o
+}
+
+func (o *Option) SetHashKey(s string) *Option {
+	o.HashKey = &s
 	return o
 }
 
@@ -152,6 +158,7 @@ func (o *Option) merge(other *Option) *Option {
 	ut.ResolveOption(&o.BroadcastChanCap, other.BroadcastChanCap)
 	ut.ResolveOption(&o.Secret, other.Secret)
 	ut.ResolveOption(&o.TraceID, other.TraceID)
+	ut.ResolveOption(&o.HashKey, other.HashKey)
 	ut.ResolveOption(&o.VerifyJwtExpire, other.VerifyJwtExpire)
 	ut.ResolveOption(&o.Debug, other.Debug)
 	ut.ResolveOption(&o.MetaCoderT, other.MetaCoderT)

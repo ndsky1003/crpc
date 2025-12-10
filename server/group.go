@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/md5"
 	"encoding/binary"
+	"math/rand"
 	"slices"
 	"sort"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 	"github.com/ndsky1003/net/server"
 )
 
-// Session 包装 net 连接
 type Session struct {
 	Name   string
 	Weight int
@@ -30,18 +30,22 @@ type ServiceGroup struct {
 	keys     []uint32
 	hashMap  map[uint32]string
 
-	// [新增] 脏标记，用于惰性重建
+	// 脏标记，用于惰性重建
 	dirty bool
+
+	//  辅助 Map，实现 O(1) 查找 Session
+	sessionMap map[string]*Session
 }
 
 func NewServiceGroup(name string, replicas int) *ServiceGroup {
 	return &ServiceGroup{
-		Name:     name,
-		Sessions: make([]*Session, 0),
-		replicas: replicas,
-		keys:     nil,
-		hashMap:  make(map[uint32]string),
-		dirty:    false, // 初始为 false
+		Name:       name,
+		Sessions:   make([]*Session, 0),
+		replicas:   replicas,
+		keys:       nil,
+		hashMap:    make(map[uint32]string),
+		dirty:      false,                     // 初始为 false
+		sessionMap: make(map[string]*Session), // 初始化 Map
 	}
 }
 
@@ -54,6 +58,8 @@ func (sg *ServiceGroup) Add(s *Session) {
 	sg.Lock()
 	defer sg.Unlock()
 
+	sg.sessionMap[s.ID().String()] = s
+
 	for i, existing := range sg.Sessions {
 		if existing.ID() == s.ID() {
 			if existing.Weight > 0 {
@@ -63,7 +69,7 @@ func (sg *ServiceGroup) Add(s *Session) {
 			if s.Weight > 0 {
 				sg.TotalWeight += s.Weight
 			}
-			sg.dirty = true // [修改] 标记为脏，不立即重建
+			sg.dirty = true
 			return
 		}
 	}
@@ -72,12 +78,15 @@ func (sg *ServiceGroup) Add(s *Session) {
 	if s.Weight > 0 {
 		sg.TotalWeight += s.Weight
 	}
-	sg.dirty = true // [修改] 标记为脏
+	sg.dirty = true
 }
 
 func (sg *ServiceGroup) Remove(sid string) {
 	sg.Lock()
 	defer sg.Unlock()
+
+	delete(sg.sessionMap, sid)
+
 	for i, s := range sg.Sessions {
 		if s.ID().String() == sid {
 			if s.Weight > 0 {
@@ -90,7 +99,6 @@ func (sg *ServiceGroup) Remove(sid string) {
 	}
 }
 
-// rebuildHashRing (保持原逻辑不变，由 SelectByKey 调用)
 func (sg *ServiceGroup) rebuildHashRing() {
 	sg.keys = make([]uint32, 0)
 	sg.hashMap = make(map[uint32]string)
@@ -109,11 +117,9 @@ func (sg *ServiceGroup) rebuildHashRing() {
 	slices.Sort(sg.keys)
 }
 
-// SelectByKey 基于一致性哈希的选择
 func (sg *ServiceGroup) SelectByKey(key string) *Session {
 	sg.RLock()
 
-	// [新增] 检查是否需要重建
 	if sg.dirty {
 		sg.RUnlock() // 释放读锁
 		sg.Lock()    // 获取写锁
@@ -133,6 +139,7 @@ func (sg *ServiceGroup) SelectByKey(key string) *Session {
 	}
 
 	hash := sg.shardingHash(key)
+	// 二分查找第一个 >= hash 的节点
 	idx := sort.Search(len(sg.keys), func(i int) bool {
 		return sg.keys[i] >= hash
 	})
@@ -144,38 +151,36 @@ func (sg *ServiceGroup) SelectByKey(key string) *Session {
 	targetHash := sg.keys[idx]
 	targetSid := sg.hashMap[targetHash]
 
-	// 注意：这里仍然需要在内部查找 Session，
-	// 如果 Remove 设置了 dirty 但还没 rebuild，SelectByKey 会触发 rebuild，
-	// 所以这里获取到的 targetSid 一定是存在的。
-	return sg.getBySidNoLock(targetSid)
+	// [优化] 直接从 Map 获取，O(1)
+	return sg.sessionMap[targetSid]
 }
 
-// Select 随机负载均衡 (这个方法不需要哈希环，所以不需要 check dirty，性能最高)
+// Select 随机负载均衡 (O(1) 复杂度，不涉及哈希环重建)
 func (sg *ServiceGroup) Select() *Session {
 	sg.RLock()
 	defer sg.RUnlock()
-	// ... (保持原代码不变)
-	if len(sg.Sessions) == 0 {
+
+	length := len(sg.Sessions)
+	if length == 0 {
 		return nil
 	}
-	// ...
-	return sg.Sessions[0]
+
+	// 如果只有一个，直接返回
+	if length == 1 {
+		return sg.Sessions[0]
+	}
+
+	// 随机选择一个
+	return sg.Sessions[rand.Intn(length)]
 }
 
-// ... GetBySid, getBySidNoLock, GetAll 保持不变 ...
+// GetBySid 根据 SID 获取 Session
 func (sg *ServiceGroup) GetBySid(sid string) *Session {
 	sg.RLock()
 	defer sg.RUnlock()
-	return sg.getBySidNoLock(sid)
-}
 
-func (sg *ServiceGroup) getBySidNoLock(sid string) *Session {
-	for _, s := range sg.Sessions {
-		if s.ID().String() == sid {
-			return s
-		}
-	}
-	return nil
+	// [优化] 直接从 Map 获取，O(1)
+	return sg.sessionMap[sid]
 }
 
 func (sg *ServiceGroup) GetAll() []*Session {

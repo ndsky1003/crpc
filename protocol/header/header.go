@@ -29,7 +29,8 @@ type Header struct {
 	ToService  string        //10 同上
 	Module     string        //10 同上
 	Method     string        //10 同上
-	TraceID    string        //10 同上
+	TraceID    string        //10 同上 链路追踪的key
+	HashKey    string        //10 同上 远程调用一致性hash
 	// [新增] 截止时间 (Unix Micro)
 	// 0 表示无限制
 	// 	v := now.UnixMicro()
@@ -101,6 +102,11 @@ func (this *Header) SetTraceID(s string) *Header {
 	return this
 }
 
+func (this *Header) SetHashKey(s string) *Header {
+	this.HashKey = s
+	return this
+}
+
 func (this *Header) SetSeq(s uint64) *Header {
 	this.Seq = s
 	return this
@@ -149,6 +155,7 @@ func (r *Header) Marshal() ([]byte, error) {
 	size += varintStrSize(r.Module)
 	size += varintStrSize(r.Method)
 	size += varintStrSize(r.TraceID)
+	size += varintStrSize(r.HashKey)
 
 	size += uvarintSize(r.Deadline)
 	size += uvarintSize(r.Seq)
@@ -191,6 +198,7 @@ func (r *Header) Marshal() ([]byte, error) {
 	idx += writeString(header[idx:], r.Method)
 
 	idx += writeString(header[idx:], r.TraceID)
+	idx += writeString(header[idx:], r.HashKey)
 
 	idx += binary.PutUvarint(header[idx:], r.Deadline)
 
@@ -266,6 +274,12 @@ func (r *Header) Unmarshal(data []byte) (err error) {
 		return err
 	}
 
+	r.HashKey, size, err = readString(data[idx:])
+	idx += size
+	if err != nil {
+		return err
+	}
+
 	r.Deadline, size = binary.Uvarint(data[idx:])
 	idx += size
 
@@ -302,6 +316,7 @@ func (r *Header) reset() {
 	r.Module = ""
 	r.Method = ""
 	r.TraceID = ""
+	r.HashKey = ""
 	r.Deadline = 0
 	r.Seq = 0
 	r.MetaLen = 0

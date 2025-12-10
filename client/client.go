@@ -340,7 +340,6 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		traceID = *tid
 		ctx = trace.WithTraceID(ctx, traceID)
 	}
-
 	seq := atomic.AddUint64(&c.seq, 1)
 	h := header.Get()
 	h.SetType(ht).
@@ -353,6 +352,10 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		SetMethod(method).
 		SetTraceID(traceID).
 		SetSeq(seq)
+
+	if s := opt.HashKey; s != nil {
+		h.SetHashKey(*s)
+	}
 
 	if deadline, ok := ctx.Deadline(); ok {
 		h.Deadline = uint64(deadline.UnixMicro())

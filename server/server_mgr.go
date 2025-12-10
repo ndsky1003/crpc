@@ -182,9 +182,13 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 		return nil
 	}
 
-	// 3. 普通请求负载均衡
-	// Header 中没有 ShardingKey 或 TargetSid 字段，因此只能进行默认负载均衡
-	target := group.Select()
+	var target *Session
+	if key := h.HashKey; key != "" {
+		target = group.SelectByKey(key)
+	} else {
+		target = group.Select()
+	}
+
 	if target == nil {
 		return s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "no available service instance"))
 	}
