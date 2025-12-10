@@ -8,6 +8,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/ndsky1003/crpc/v3/buffer"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
@@ -18,6 +19,7 @@ import (
 	"github.com/ndsky1003/net/conn"
 	"github.com/ndsky1003/net/logger"
 	"github.com/ndsky1003/net/server"
+	"github.com/panjf2000/ants/v2"
 )
 
 type server_mgr struct {
@@ -26,6 +28,7 @@ type server_mgr struct {
 	connCache        sync.Map // map[uuid.UUID]*conn.Conn (临时存储连接)
 	once             sync.Once
 	broadcastCounter *broadcastCounterAll //tcpid -> seq -> *broadcastCounterItem (广播请求计数器)
+	workPool         *ants.Pool
 }
 
 func (s *server_mgr) Close() error {
@@ -68,34 +71,58 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("unpack error: %v", err)
 	}
-	defer h.Release()
 	if h.Type.IsReq() {
 		if h.Deadline > 0 {
 			now := uint64(time.Now().UnixMicro())
 			if now >= h.Deadline {
 				// 可选：回包告知 Client 已超时（虽然 Client 可能已经不等了，但为了协议完整性建议回）
 				s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "server-side timeout deadline exceeded"))
+				h.Release()
 				return nil
 			}
 		}
 		if h.Flags.IsHandshake() {
-			return s.handleVerify(sess, h, body)
+			err := s.handleVerify(sess, h, body)
+			h.Release()
+			return err
 		}
 	}
 
-	go func() {
-		copy_h := *h
-		copy_meta := make([]byte, len(meta))
-		copy(copy_meta, meta)
-		copy_body := make([]byte, len(body))
-		copy(copy_body, body)
-		if err := s.route(sess, &copy_h, copy_meta, copy_body); err != nil {
+	copy_meta := buffer.Get()
+	meta_l, err := copy_meta.Write(meta)
+	if err != nil {
+		h.Release()
+		copy_meta.Release()
+		return err
+	}
+	copy_body := buffer.Get()
+	body_l, err := copy_body.Write(body)
+	if err != nil {
+		h.Release()
+		copy_meta.Release()
+		copy_body.Release()
+		return err
+	}
+	task := func() {
+		defer h.Release()
+		defer copy_meta.Release()
+		defer copy_body.Release()
+		if err := s.route(sess, h, copy_meta.Bytes()[:meta_l], copy_body.Bytes()[:body_l]); err != nil {
 			logger.Errorf("route error: %v", err)
 		}
-	}()
+	}
+	if err = s.workPool.Submit(task); err != nil {
+		if err == ants.ErrPoolOverload {
+			h.Release()
+			copy_meta.Release()
+			copy_body.Release()
+			return errors.New(errors.ServerInternal, "server busy")
+		}
+		return err
+	}
 	return nil
-
 }
+
 func (s *server_mgr) route(sess server.Session, h *header.Header, meta, body []byte) error {
 	if h.Type.IsReq() {
 		return s.handleReq(sess, h, meta, body)
@@ -126,7 +153,7 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 			return nil
 		}
 		count := int32(len(targets))
-		s.setBroadcastCount(sess.ID(), h.Seq, count, timeout)
+		s.broadcastCounter.setBroadcastCount(sess.ID(), h.Seq, count, timeout)
 
 		packet, err := protocol.Pack(h, meta, body)
 		if err != nil {
@@ -159,7 +186,7 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, meta, body []
 	targetSess := target.(server.Session)
 	// [新增] 广播响应的拦截处理
 	if h.Flags.IsBroadcast() {
-		if remain := s.decreaseBroadcastCount(tosid, h.Seq); remain <= 0 {
+		if remain := s.broadcastCounter.decreaseBroadcastCount(tosid, h.Seq); remain <= 0 {
 			h.Flags.Add(headerflags.EOS)
 		}
 		// 注意：如果重启了 Server 或者超时清理了 Map，

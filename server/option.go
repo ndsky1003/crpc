@@ -16,6 +16,7 @@ type Option struct {
 	GroupReplicas              *int
 	SendTimeout                *time.Duration //消息上来发送给别的端点的超时时间
 	BroadcastCounterExpiration *time.Duration //counter item 的过期时间
+	WorkerSize                 *int
 	server.Option
 }
 
@@ -28,6 +29,11 @@ func (this *Option) WithConn(fn func(*server.Option)) *Option {
 
 func (this *Option) SetSecret(s string) *Option {
 	this.Secret = &s
+	return this
+}
+
+func (this *Option) SetWorkerSize(s int) *Option {
+	this.WorkerSize = &s
 	return this
 }
 
@@ -55,6 +61,7 @@ func (this *Option) merge(delta *Option) *Option {
 	ut.ResolveOption(&this.GroupReplicas, delta.GroupReplicas)
 	ut.ResolveOption(&this.SendTimeout, delta.SendTimeout)
 	ut.ResolveOption(&this.BroadcastCounterExpiration, delta.BroadcastCounterExpiration)
+	ut.ResolveOption(&this.WorkerSize, delta.WorkerSize)
 
 	this.Option = this.Option.Merge(&delta.Option)
 	return this
