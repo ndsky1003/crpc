@@ -101,7 +101,7 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 	}
 
 	// 2. 处理鉴权请求 (VerifyReq)
-	if h.Type == headertype.VerifyReq {
+	if h.Flags.IsHandshake() {
 		return s.handleVerify(sess, h, body)
 	}
 
@@ -183,7 +183,8 @@ func (s *server_mgr) replyVerify(sess server.Session, reqH *header.Header, req *
 	// 3. 构建响应 Header
 	// 必须使用 VerifyRes 类型，Client 端的 onConnected 正在 Read() 等待
 	h := header.Get()
-	h.Type = headertype.VerifyRes
+	h.Type = headertype.Res
+	h.SetFlags(reqH.Flags)
 	h.Code = code
 	h.Seq = reqH.Seq // 保持 Seq 一致
 
@@ -211,7 +212,7 @@ func (s *server_mgr) route(srcSess server.Session, h *header.Header, meta, body 
 		}
 		group := val.(*ServiceGroup)
 		// 2. 处理广播请求
-		if h.Type == headertype.BroadcastReq {
+		if h.Flags.IsBroadcast() {
 			targets := group.GetAll()
 			if len(targets) == 0 {
 				// 广播如果没人在线，通常不需要报错，或者报 warning
@@ -275,7 +276,7 @@ func (s *server_mgr) route(srcSess server.Session, h *header.Header, meta, body 
 		target, ok := s.connCache.Load(tosid)
 		if !ok {
 			// 如果客户端掉线，记得清理计数器防止内存泄漏
-			if h.Type == headertype.BroadcastRes {
+			if h.Flags.IsBroadcast() {
 				key := getBroadcastKey(tosid.String(), h.Seq)
 				s.broadcastCounter.Delete(key)
 			}
@@ -283,7 +284,7 @@ func (s *server_mgr) route(srcSess server.Session, h *header.Header, meta, body 
 		}
 		targetSess := target.(server.Session)
 		// [新增] 广播响应的拦截处理
-		if h.Type == headertype.BroadcastRes {
+		if h.Flags.IsBroadcast() {
 			key := getBroadcastKey(tosid.String(), h.Seq)
 			if val, ok := s.broadcastCounter.Load(key); ok {
 				item := val.(*broadcastCounterItem)
@@ -322,14 +323,13 @@ func (s *server_mgr) replyError(srcSess server.Session, reqH *header.Header, cod
 	// 根据请求类型设置响应类型
 	if reqH.Type == headertype.Req {
 		h.Type = headertype.Res
-	} else if reqH.Type == headertype.BroadcastReq {
-		h.Type = headertype.BroadcastRes
 	} else {
 		// Send 类型不需要回包
 		h.Release()
 		return nil
 	}
 
+	h.SetFlags(reqH.Flags)
 	h.Code = code
 	h.Seq = reqH.Seq
 	h.ResCoderT = coder.Msgp // 错误信息默认用 Msgp

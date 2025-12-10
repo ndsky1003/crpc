@@ -6,7 +6,9 @@ const None T = 0
 const (
 	Debug T = 1 << iota //这条数据是否打开调试日志
 	UUID
-	EOS //End-Of-Stream
+	EOS       //End-Of-Stream
+	Broadcast //这条是广播消息
+	Handshake //握手/鉴权
 )
 
 func (f *T) Add(flag T) *T {
@@ -40,4 +42,12 @@ func (f T) IsDebug() bool {
 
 func (f T) IsEOS() bool {
 	return f.Has(EOS)
+}
+
+func (f T) IsBroadcast() bool {
+	return f.Has(Broadcast)
+}
+
+func (f T) IsHandshake() bool {
+	return f.Has(Handshake)
 }

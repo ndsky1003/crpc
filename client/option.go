@@ -26,6 +26,7 @@ type Option struct {
 	ResCoderT            *coder.T
 	CompressT            *compressor.T
 	Debug                *bool
+	Broadcast            *bool
 	BroadcastResNewFunc  func() any                  // 用于广播调用时创建返回值对象
 	BroadcastResCallBack func(any, error, bool) bool // 返回true表示继续广播,返回false表示停止广播
 	client.Option
@@ -35,6 +36,12 @@ func (this *Option) WithConn(fn func(*client.Option)) *Option {
 	if fn != nil {
 		fn(&this.Option)
 	}
+	return this
+}
+
+func (this *Option) SetBroadcast() *Option {
+	t := true
+	this.Broadcast = &t
 	return this
 }
 
@@ -124,7 +131,7 @@ func (o *Option) SetBroadcaseResNewFunc(f func() any) *Option {
 	return o
 }
 
-func (o *Option) SetBroadcaseResCallBack(f func(any, error) bool) *Option {
+func (o *Option) SetBroadcaseResCallBack(f func(any, error, bool) bool) *Option {
 	if o == nil {
 		return o
 	}
@@ -151,6 +158,7 @@ func (o *Option) merge(other *Option) *Option {
 	ut.ResolveOption(&o.ReqCoderT, other.ReqCoderT)
 	ut.ResolveOption(&o.ResCoderT, other.ResCoderT)
 	ut.ResolveOption(&o.CompressT, other.CompressT)
+	ut.ResolveOption(&o.Broadcast, other.Broadcast)
 	if other.BroadcastResNewFunc != nil {
 		o.BroadcastResNewFunc = other.BroadcastResNewFunc
 	}

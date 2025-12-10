@@ -18,9 +18,9 @@ import (
 // +------+-------+------+------+------+------+------+------------------+-----------------------+
 // ^ idx=0                                           ^ idx=7            ^ idx=23 (if has UUID)
 type Header struct {
-	Type       headertype.T  //1
-	Flags      headerflags.T //1
-	Code       headercode.T  //1
+	Type       headertype.T  //1 决定去向
+	Flags      headerflags.T //1 决定行为
+	Code       headercode.T  //1 决定状态,怎么处理这个结果
 	MetaCoderT coder.T       //1
 	ReqCoderT  coder.T       //1
 	ResCoderT  coder.T       //1
@@ -48,6 +48,11 @@ const (
 
 func (this *Header) SetType(t headertype.T) *Header {
 	this.Type = t
+	return this
+}
+
+func (this *Header) SetFlags(t headerflags.T) *Header {
+	this.Flags = t
 	return this
 }
 

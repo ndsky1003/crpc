@@ -97,7 +97,8 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
-	h := header.Get().SetType(headertype.VerifyReq)
+	h := header.Get().SetType(headertype.Req)
+	h.Flags.With(headerflags.Handshake)
 	packets, err := protocol.Pack(h, nil, []byte(ss))
 	if err != nil {
 		h.Release()
@@ -136,7 +137,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	if err := coder.Unmarshal(coder.Msgp, claim.Data, &resp); err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
-	if res_h.Type == headertype.VerifyRes && res_h.Code.IsOK() {
+	if res_h.Type == headertype.Res && res_h.Flags.IsHandshake() && res_h.Code.IsOK() {
 		this.UUID = resp.UUID
 		return nil
 	}
@@ -162,7 +163,7 @@ func (c *Client) HandleMsg(data []byte) error {
 		copy(metaCopy, meta)
 		go c.handleReq(ctx, h, metaCopy, bodyCopy)
 	case h.Type.IsRes():
-		if h.Type == headertype.BroadcastRes {
+		if h.Flags.IsBroadcast() {
 			if err := c.handleRes(ctx, h, bodyCopy); err != nil {
 				log.Println("handleRes :", err)
 			}
@@ -203,7 +204,7 @@ func (c *Client) invoke_local_func(ctx context.Context, mod, method string, meta
 	}
 }
 
-func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) error {
+func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) error {
 	defer h.Release()
 	seq := h.Seq
 
@@ -217,7 +218,7 @@ func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) e
 
 	// 2. 统一处理逻辑，减少重复代码
 	// 无论是 OK 还是 Error，如果是广播，流程都很像
-	isBroadcast := h.Type == headertype.BroadcastRes
+	isBroadcast := h.Flags.IsBroadcast()
 
 	if isBroadcast {
 		d := &broadcastResult{rawBody: body, resCoderT: h.ResCoderT, code: h.Code, IsEOS: h.Flags.IsEOS()}
@@ -265,8 +266,6 @@ func (c *Client) sendReply(h *header.Header, res any, err error) error {
 	switch req_type {
 	case headertype.Req:
 		res_type = headertype.Res
-	case headertype.BroadcastReq:
-		res_type = headertype.BroadcastRes
 	default:
 		return errors.New(errors.ClientInternal, "unknown request type")
 	}
@@ -340,24 +339,6 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		ctx = trace.WithTraceID(ctx, traceID)
 	}
 
-	if ht == headertype.BroadcastReq {
-		if opt.BroadcastResNewFunc == nil || opt.BroadcastResCallBack == nil {
-			call.Error = errors.New(errors.ClientInvalidArgs, "BroadcaseResNewFunc and BroadcaseResCallBack are required for broadcast calls")
-			call.done()
-			return
-		}
-		call.BroadcaseResNewFunc = opt.BroadcastResNewFunc
-		call.BroadcaseResCallBack = opt.BroadcastResCallBack
-
-		call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
-		subCtx, cancel := context.WithCancel(ctx)
-		call.ctx = subCtx
-		call.cancel = cancel
-
-		// 2. 启动独立的消费协程
-		// 将 ctx 传入，以便在请求超时/取消时退出循环
-		go c.processBroadcastLoop(subCtx, call)
-	}
 	seq := atomic.AddUint64(&c.seq, 1)
 	h := header.Get()
 	h.SetType(ht).
@@ -375,6 +356,29 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		h.Deadline = uint64(deadline.UnixMicro())
 	} else {
 		h.Deadline = 0
+	}
+
+	if b := opt.Broadcast; b != nil && *b {
+		h.Flags.Add(headerflags.Broadcast)
+	}
+
+	if h.Flags.IsBroadcast() {
+		if opt.BroadcastResNewFunc == nil || opt.BroadcastResCallBack == nil {
+			call.Error = errors.New(errors.ClientInvalidArgs, "BroadcaseResNewFunc and BroadcaseResCallBack are required for broadcast calls")
+			call.done()
+			return
+		}
+		call.BroadcaseResNewFunc = opt.BroadcastResNewFunc
+		call.BroadcaseResCallBack = opt.BroadcastResCallBack
+
+		call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
+		subCtx, cancel := context.WithCancel(ctx)
+		call.ctx = subCtx
+		call.cancel = cancel
+
+		// 2. 启动独立的消费协程
+		// 将 ctx 传入，以便在请求超时/取消时退出循环
+		go c.processBroadcastLoop(subCtx, call)
 	}
 
 	isLocalCall := (c.Name == serviceName) && (ht == headertype.Req)

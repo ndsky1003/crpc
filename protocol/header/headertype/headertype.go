@@ -7,22 +7,13 @@ type T uint8
 // 核心技巧：所有的响应类型定义为偶数
 const (
 	None T = 0
-	// --- 握手与鉴权 ---
-	VerifyReq T = 1
-	VerifyRes T = 2
-
 	// --- 普通 RPC ---
-	Req T = 3
-	Res T = 4
-
-	// --- 广播 ---
-	BroadcastReq T = 5
-	BroadcastRes T = 6
-
+	Req T = 1
+	Res T = 2
 	// --- 单向消息 ---
 	// Send 比较特殊，它是请求但不需要回包。
 	// 为了 IsReq 逻辑统一，建议把它设为奇数
-	Send T = 7
+	Send T = 3
 )
 
 func (t T) IsReq() bool {
@@ -42,18 +33,10 @@ func (t T) IsRes() bool {
 
 func (t T) String() string {
 	switch t {
-	case VerifyReq:
-		return "VerifyReq"
-	case VerifyRes:
-		return "VerifyRes"
 	case Req:
 		return "Req"
 	case Res:
 		return "Res"
-	case BroadcastReq:
-		return "BroadcastReq"
-	case BroadcastRes:
-		return "BroadcastRes"
 	case Send:
 		return "Send" // 补上了
 	case None:
