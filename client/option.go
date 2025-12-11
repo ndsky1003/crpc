@@ -14,19 +14,20 @@ func Options() *Option {
 }
 
 type Option struct {
-	Meta                 any
-	Weight               *int
-	BroadcastChanCap     *int
-	Secret               *string
-	TraceID              *string
-	HashKey              *string
-	VerifyJwtExpire      *time.Duration
-	MetaCoderT           *coder.T
-	ReqCoderT            *coder.T
-	ResCoderT            *coder.T
-	CompressT            *compressor.T
-	Debug                *bool
-	Broadcast            *bool
+	Meta                 any                         // 用户自定义元数据,会被传递到服务端
+	Weight               *int                        // 权重,用于负载均衡
+	Timeout              *time.Duration              // 超时时间 ,ctx的优先级更高,没有ctx则使用该值,兜底
+	Secret               *string                     // 用于JWT签名的密钥
+	TraceID              *string                     // 用于链路追踪的TraceID
+	HashKey              *string                     // 用于一致性哈希负载均衡的HashKey
+	VerifyJwtExpire      *time.Duration              // 用于验证JWT过期时间,如果不设置则使用默认值15秒
+	MetaCoderT           *coder.T                    // 用于元数据的编解码器类型
+	ReqCoderT            *coder.T                    // 用于请求体的编解码器类型
+	ResCoderT            *coder.T                    // 用于响应体的编解码器类型
+	CompressT            *compressor.T               // 用于压缩算法类型
+	Debug                *bool                       // 是否开启调试模式,开启后会打印更多日志
+	Broadcast            *bool                       // 是否为广播调用
+	BroadcastChanCap     *int                        // 广播调用时,每个响应结果的chan容量
 	BroadcastResNewFunc  func() any                  // 用于广播调用时创建返回值对象
 	BroadcastResCallBack func(any, error, bool) bool // 返回true表示继续广播,返回false表示停止广播
 	client.Option
@@ -70,6 +71,11 @@ func (o *Option) SetHashKey(s string) *Option {
 
 func (o *Option) SetVerifyJwtExpire(t time.Duration) *Option {
 	o.VerifyJwtExpire = &t
+	return o
+}
+
+func (o *Option) SetTimeout(d time.Duration) *Option {
+	o.Timeout = &d
 	return o
 }
 
@@ -153,6 +159,7 @@ func (o *Option) merge(other *Option) *Option {
 	ut.ResolveOption(&o.TraceID, other.TraceID)
 	ut.ResolveOption(&o.HashKey, other.HashKey)
 	ut.ResolveOption(&o.VerifyJwtExpire, other.VerifyJwtExpire)
+	ut.ResolveOption(&o.Timeout, other.Timeout)
 	ut.ResolveOption(&o.Debug, other.Debug)
 	ut.ResolveOption(&o.MetaCoderT, other.MetaCoderT)
 	ut.ResolveOption(&o.ReqCoderT, other.ReqCoderT)

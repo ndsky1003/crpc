@@ -24,8 +24,8 @@ type Call struct {
 	BroadcastResNewFunc  func() any                              // 用于广播调用时创建返回值对象
 	BroadcastResCallBack func(ret any, err error, eos bool) bool // 返回true表示继续广播,返回false表示停止广播
 	broadcastCh          chan *broadcastResult
-	ctx                  context.Context
-	cancel               context.CancelFunc
+	subCtx               context.Context
+	subCancel            context.CancelFunc
 	//broadcast 相关字段 end
 
 	finished atomic.Bool
@@ -44,8 +44,8 @@ func (this *Call) done() {
 	}
 
 	// 这会让 processBroadcastLoop 安全退出，而不需要关闭 channel
-	if this.cancel != nil {
-		this.cancel()
+	if this.subCancel != nil {
+		this.subCancel()
 	}
 	select {
 	case this.Done <- this:

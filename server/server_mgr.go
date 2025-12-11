@@ -81,15 +81,17 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 			now := uint64(time.Now().UnixMicro())
 			if now >= h.Deadline {
 				// 可选：回包告知 Client 已超时（虽然 Client 可能已经不等了，但为了协议完整性建议回）
-				s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "server-side timeout deadline exceeded"))
-				h.Release()
-				return nil
+				defer h.Release()
+				return s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "server-side timeout deadline exceeded"))
 			}
 		}
 		if h.Flags.IsHandshake() {
-			err := s.handleVerify(sess, h, body)
-			h.Release()
-			return err
+			defer h.Release()
+			if err := s.handleVerify(sess, body); err != nil {
+				return s.replyVerify(sess, h, err)
+			} else {
+				return s.replyVerify(sess, h, nil)
+			}
 		}
 	}
 
@@ -198,8 +200,9 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 			if err = s.workPool.Submit(task); err != nil {
 				if err == ants.ErrPoolOverload {
 					err = errors.New(errors.ServerInternal, "server busy")
+				} else {
+					err = errors.New(errors.ServerInternal, err.Error())
 				}
-				err = errors.New(errors.ServerInternal, err.Error())
 				handleFailure(err)
 			}
 		}
@@ -240,7 +243,7 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, meta, body []
 }
 
 // handleVerify 处理服务注册鉴权
-func (s *server_mgr) handleVerify(sess server.Session, reqH *header.Header, body []byte) error {
+func (s *server_mgr) handleVerify(sess server.Session, body []byte) error {
 	secret := *s.opt.Secret
 
 	var claim protocol.JwtClaims
@@ -249,12 +252,15 @@ func (s *server_mgr) handleVerify(sess server.Session, reqH *header.Header, body
 	})
 
 	if err != nil || !token.Valid {
-		return s.replyVerify(sess, reqH, nil, errors.Newf(errors.ServerInternal, "jwt verify failed: %v", err))
+		return errors.Newf(errors.ServerInternal, "jwt verify failed: %v", err)
 	}
 
 	var req protocol.VerifyReq
 	if err := coder.Unmarshal(coder.Msgp, claim.Data, &req); err != nil {
-		return s.replyVerify(sess, reqH, nil, errors.Newf(errors.ServerInternal, "unmarshal verify req failed: %v", err))
+		return errors.Newf(errors.ServerInternal, "unmarshal verify req failed: %v", err)
+	}
+	if req.UUID != uuid.Nil {
+		sess.SetID(req.UUID)
 	}
 
 	if oldGroupVal, loaded := s.sidGroupIndex.Load(sess.ID()); loaded {
@@ -279,12 +285,11 @@ func (s *server_mgr) handleVerify(sess server.Session, reqH *header.Header, body
 
 	logger.Infof("Service Registered: %s [Sid:%s, Weight:%d]", req.Name, sess.ID(), req.Weight)
 
-	// 4. 回复鉴权成功
-	return s.replyVerify(sess, reqH, &req, nil)
+	return nil
 }
 
 // replyVerify 回复鉴权结果
-func (s *server_mgr) replyVerify(sess server.Session, reqH *header.Header, req *protocol.VerifyReq, verifyErr error) error {
+func (s *server_mgr) replyVerify(sess server.Session, reqH *header.Header, verifyErr error) error {
 	resp := &protocol.VerifyRes{
 		Message: "OK",
 	}
@@ -294,10 +299,6 @@ func (s *server_mgr) replyVerify(sess server.Session, reqH *header.Header, req *
 		resp.Message = verifyErr.Error()
 		reqH.Code = headercode.Failed
 	} else {
-		if req.UUID != uuid.Nil {
-			// 设置 Session ID 为客户端指定的 UUID ,这里是重连上来的
-			sess.SetID(req.UUID)
-		}
 		resp.UUID = sess.ID()
 	}
 	body, err := coder.Marshal(coder.Msgp, resp)

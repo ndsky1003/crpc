@@ -46,6 +46,7 @@ func New(ctx context.Context, name string, addr string, opts ...*Option) (c *Cli
 		SetSecret(ut.GetEnv("CRPC_SECRET", "8620506fd4781174ec05fcacf816a12e")).
 		SetVerifyJwtExpire(ut.GetEnvDuration("CRPC_JWT_EXPIRE", 5*time.Second)).
 		SetDebug(ut.GetEnvBool("CRPC_DEBUG", false)).
+		SetTimeout(10 * time.Second).
 		SetMetaCoderT(coder.JSON).
 		SetReqCoderT(coder.JSON).
 		SetResCoderT(coder.JSON).
@@ -75,7 +76,6 @@ func New(ctx context.Context, name string, addr string, opts ...*Option) (c *Cli
 	if err != nil {
 		return nil, err
 	}
-
 	c.client = nc
 	return c, nil
 }
@@ -230,7 +230,7 @@ func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) err
 		d := &broadcastResult{rawBody: body, resCoderT: h.ResCoderT, code: h.Code, IsEOS: h.Flags.IsEOS()}
 		select {
 		case call.broadcastCh <- d:
-		case <-call.ctx.Done():
+		case <-call.subCtx.Done():
 			// [安全保护] 消费者已死 (可能用户取消了，或者并发的其他 EOS 导致退出了)
 			// 此时直接丢弃消息，不阻塞，也不 panic
 			return nil
@@ -361,6 +361,10 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		h.SetHashKey(*s)
 	}
 
+	//TODO: ctx的控制
+	if _, ok := ctx.Deadline(); !ok {
+		ctx, _ = context.WithDeadline(ctx, time.Now().Add(*opt.Timeout))
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		h.Deadline = uint64(deadline.UnixMicro())
 	} else {
@@ -381,9 +385,9 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		call.BroadcastResCallBack = opt.BroadcastResCallBack
 
 		call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
-		subCtx, cancel := context.WithCancel(ctx)
-		call.ctx = subCtx
-		call.cancel = cancel
+		subCtx, subCancel := context.WithCancel(context.Background())
+		call.subCtx = subCtx
+		call.subCancel = subCancel
 
 		// 2. 启动独立的消费协程
 		// 将 ctx 传入，以便在请求超时/取消时退出循环
