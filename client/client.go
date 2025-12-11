@@ -35,7 +35,11 @@ type Client struct {
 	serviceMap sync.Map // map[string]*service (本地服务注册)
 }
 
-func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err error) {
+func Dial(ctx context.Context, name string, addr string, opts ...*Option) (c *Client, err error) {
+	return New(ctx, name, addr, opts...)
+}
+
+func New(ctx context.Context, name string, addr string, opts ...*Option) (c *Client, err error) {
 	opt := Options().
 		SetWeight(ut.GetEnvInt("CRPC_WEIGHT", 10)).
 		SetBroadcastChanCap(ut.GetEnvInt("CRPC_BROADCAST_CAP", 64)).
@@ -48,7 +52,7 @@ func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err erro
 		SetCompressT(compressor.Raw).
 		Merge(opts...)
 
-	if opt.Name == nil {
+	if name == "" {
 		return nil, errors.New(errors.ClientInvalidArgs, "service name is required")
 	}
 
@@ -61,7 +65,7 @@ func New(ctx context.Context, addr string, opts ...*Option) (c *Client, err erro
 	}
 
 	c = &Client{
-		Name: *opt.Name,
+		Name: name,
 		opt:  &opt,
 	}
 
@@ -81,7 +85,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	secret := *this.opt.Secret
 	req := &protocol.VerifyReq{
 		UUID:   this.UUID,
-		Name:   *this.opt.Name,
+		Name:   this.Name,
 		Weight: *this.opt.Weight,
 	}
 	body, err := coder.Marshal(coder.Msgp, req)

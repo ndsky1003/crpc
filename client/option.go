@@ -15,7 +15,6 @@ func Options() *Option {
 
 type Option struct {
 	Meta                 any
-	Name                 *string
 	Weight               *int
 	BroadcastChanCap     *int
 	Secret               *string
@@ -51,11 +50,6 @@ func (o *Option) SetMeta(meta any) *Option {
 		return o
 	}
 	o.Meta = meta
-	return o
-}
-
-func (o *Option) SetName(name string) *Option {
-	o.Name = &name
 	return o
 }
 
@@ -153,7 +147,6 @@ func (o *Option) merge(other *Option) *Option {
 	if other.Meta != nil {
 		o.Meta = other.Meta
 	}
-	ut.ResolveOption(&o.Name, other.Name)
 	ut.ResolveOption(&o.Weight, other.Weight)
 	ut.ResolveOption(&o.BroadcastChanCap, other.BroadcastChanCap)
 	ut.ResolveOption(&o.Secret, other.Secret)

@@ -130,22 +130,28 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 
 func (s *server_mgr) route(sess server.Session, h *header.Header, meta, body []byte) error {
 	if h.Type.IsReq() {
-		return s.handleReq(sess, h, meta, body)
+		err := s.handleReq(sess, h, meta, body)
+		if err != nil {
+			s.replyError(sess, h, err)
+		}
+		return err
 	} else {
 		return s.handleRes(sess, h, meta, body)
 	}
 }
 
 func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body []byte) error {
+	h.UUID = sess.ID() //返回链路
 	val, ok := s.services.Load(h.ToService)
 	if !ok {
-		return s.replyError(sess, h, errors.Newf(errors.ServerServiceNotFound, "service %s not found", h.ToService))
+		logger.Warnf("Service %s not found for request", h.ToService)
+		return errors.Newf(errors.ServerServiceNotFound, "service %s not found", h.ToService)
 	}
 	group := val.(*ServiceGroup)
 	timeout := *s.opt.SendTimeout
 	if deadline := h.Deadline; deadline != 0 {
 		if t := time.Until(time.UnixMicro(int64(deadline))); t <= 0 {
-			return s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "broadcast request deadline exceeded"))
+			return errors.New(errors.ServerDeadlineExceeded, "broadcast request deadline exceeded")
 		} else {
 			timeout = t
 		}
@@ -153,30 +159,48 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 	// 2. 处理广播请求
 	if h.Flags.IsBroadcast() {
 		targets := group.GetAll()
+		sid := sess.ID()
+		seq := h.Seq
 		if len(targets) == 0 {
 			if h.Type == headertype.Req { //send 不需要回
 				h.Flags.With(headerflags.EOS)
 			}
-			return s.replyError(sess, h, errors.New(errors.ServerServiceUnavailable, "无可广播的对象"))
+			return errors.New(errors.ServerServiceUnavailable, "无可广播的对象")
 		}
-		count := int32(len(targets))
-		s.broadcastCounter.setBroadcastCount(sess.ID(), h.Seq, count, timeout)
-
 		packet, err := protocol.Pack(h, meta, body)
 		if err != nil {
+			if h.Type == headertype.Req { //send 不需要回
+				h.Flags.With(headerflags.EOS)
+			}
 			return err
 		}
-		for _, target := range targets {
+		count := int32(len(targets))
+		s.broadcastCounter.setBroadcastCount(sid, seq, count, timeout)
+
+		for _, t := range targets {
+			target := t
+			copy_h := *h
+			handleFailure := func(err error) {
+				if remain := s.broadcastCounter.decreaseBroadcastCount(sid, seq); remain <= 0 {
+					copy_h.Flags.With(headerflags.EOS)
+				}
+				if replyErr := s.replyError(sess, &copy_h, err); replyErr != nil {
+					logger.Error(replyErr)
+				}
+			}
 			task := func() {
-				target.Sends(context.Background(), packet, server.Options().WithConn(func(o *conn.Option) {
+				if err := target.Sends(context.Background(), packet, server.Options().WithConn(func(o *conn.Option) {
 					o.SetWriteTimeout(timeout)
-				}))
+				})); err != nil {
+					handleFailure(err)
+				}
 			}
 			if err = s.workPool.Submit(task); err != nil {
 				if err == ants.ErrPoolOverload {
-					return errors.New(errors.ServerInternal, "server busy")
+					err = errors.New(errors.ServerInternal, "server busy")
 				}
-				return errors.New(errors.ServerInternal, err.Error())
+				err = errors.New(errors.ServerInternal, err.Error())
+				handleFailure(err)
 			}
 		}
 		return nil
@@ -190,7 +214,7 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 	}
 
 	if target == nil {
-		return s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "no available service instance"))
+		return errors.New(errors.ServerDeadlineExceeded, "no available service instance")
 	}
 	return s.forward(target, h, meta, body, timeout)
 }
@@ -309,9 +333,12 @@ func (s *server_mgr) forward(sess server.Session, h *header.Header, meta, body [
 	}))
 }
 
-func (s *server_mgr) replyError(srcSess server.Session, h *header.Header, rpcErr *errors.Error) error {
+func (s *server_mgr) replyError(srcSess server.Session, h *header.Header, rpcErr error) error {
 	if h.Type == headertype.Req {
 		h.Type = headertype.Res
+	} else { //send
+		logger.Warnf("no need to reply error for send type, sid: %s, method: %s", srcSess.ID(), h.Method)
+		return nil
 	}
 	h.Code = headercode.Failed
 	h.ResCoderT = coder.Msgp // 错误信息默认用 Msgp
