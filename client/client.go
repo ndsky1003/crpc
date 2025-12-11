@@ -72,12 +72,26 @@ func New(ctx context.Context, name string, addr string, opts ...*Option) (c *Cli
 
 	nc, err := client.Dial(ctx, c.Name, addr, client.Options().
 		SetHandler(c).
+		SetOnDisconnected(c.onDisconnected).
 		SetOnConnected(c.onConnected))
 	if err != nil {
 		return nil, err
 	}
 	c.client = nc
 	return c, nil
+}
+
+func (c *Client) onDisconnected(err error) {
+	closeErr := errors.New(errors.ClientCanceled, fmt.Sprintf("connection reset: %v", err))
+	c.pending.Range(func(key, value any) bool {
+		seq := key.(uint64)
+		call := value.(*Call)
+		call.Error = closeErr
+		call.done()
+		c.pending.Delete(seq)
+		return true // 继续遍历下一个
+	})
+	log.Printf("Client %s disconnected, cleared all pending calls: %v", c.Name, err)
 }
 
 // onconnect
@@ -319,14 +333,14 @@ func (c *Client) sendPacket(ctx context.Context, packet [][]byte, opts ...*Optio
 	return c.client.Sends(ctx, packet, &opt.Option)
 }
 
-func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method string, args, reply any, opts ...*Option) (call *Call) {
+func (c *Client) _go(ctx context.Context, ht headertype.T, service, method string, args, reply any, opts ...*Option) (call *Call) {
 	call = NewCall()
 	if ctx == nil {
 		call.Error = errors.New(errors.ClientInvalidArgs, "context is required")
 		call.done()
 		return
 	}
-	if serviceName == "" {
+	if service == "" {
 		call.Error = errors.New(errors.ClientInvalidArgs, "service name is required")
 		call.done()
 		return
@@ -351,7 +365,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		SetReqCoderT(*opt.ReqCoderT).
 		SetResCoderT(*opt.ResCoderT).
 		SetCompressT(*opt.CompressT).
-		SetToService(serviceName).
+		SetToService(service).
 		SetModule(module).
 		SetMethod(method).
 		SetTraceID(traceID).
@@ -361,12 +375,19 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		h.SetHashKey(*s)
 	}
 
-	//TODO: ctx的控制
-	if _, ok := ctx.Deadline(); !ok {
-		ctx, _ = context.WithDeadline(ctx, time.Now().Add(*opt.Timeout))
+	var finalDeadline time.Time
+	if d, ok := ctx.Deadline(); ok {
+		finalDeadline = d
 	}
-	if deadline, ok := ctx.Deadline(); ok {
-		h.Deadline = uint64(deadline.UnixMicro())
+	if opt.Timeout != nil && *opt.Timeout > 0 {
+		optDeadline := time.Now().Add(*opt.Timeout)
+		if finalDeadline.IsZero() || optDeadline.Before(finalDeadline) {
+			finalDeadline = optDeadline
+		}
+	}
+
+	if !finalDeadline.IsZero() {
+		h.Deadline = uint64(finalDeadline.UnixMicro())
 	} else {
 		h.Deadline = 0
 	}
@@ -394,7 +415,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, serviceName, method s
 		go c.processBroadcastLoop(subCtx, call)
 	}
 
-	isLocalCall := (c.Name == serviceName) && (ht == headertype.Req)
+	isLocalCall := (c.Name == service) && (ht == headertype.Req)
 	metaT := *opt.MetaCoderT
 	reqT := *opt.ReqCoderT
 	resT := *opt.ResCoderT
