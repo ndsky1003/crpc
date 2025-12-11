@@ -12,7 +12,7 @@ import (
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
 )
 
-// dynamic_service 动态服务容器，用于托管通过 RegisterFunction 注册的函数
+// dynamic_service 动态服务容器，用于托管通过 RegisterFunc 或 Struct 扫描注册的函数
 // 它实现了 client_handler 接口，在 serviceMap 中扮演一个 Module 的角色
 type dynamic_service struct {
 	methods map[string]*method_meta
@@ -44,10 +44,8 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 		return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("method %s not found in dynamic module", method))
 	}
 
-	// 1. 构造参数列表
 	var args []reflect.Value
 
-	// Arg: Context
 	if info.hasCtx {
 		args = append(args, reflect.ValueOf(ctx))
 	}
@@ -95,22 +93,17 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 		args = append(args, reqVal)
 	}
 
-	// 2. 反射调用
 	results := info.fn.Call(args)
 
-	// 3. 处理返回值
-	// 约定：最后一个返回值必须是 error
 	errIdx := len(results) - 1
 	if errIdx < 0 {
 		return nil, nil // Should not happen
 	}
 
-	// 检查 error
 	if !results[errIdx].IsNil() {
 		return nil, results[errIdx].Interface().(error)
 	}
 
-	// 如果有返回值 (res, error)
 	if len(results) > 1 {
 		return results[0].Interface(), nil
 	}
@@ -118,15 +111,65 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 	return nil, nil
 }
 
-// RegisterFunction 注册一个普通函数作为 RPC 处理程序
-// moduleName: 模块名 (对应 call 时的 "module.method" 中的 module)
-// fn: 处理函数，签名应类似于 func([ctx], [meta], req) ([res], err)
-// name: (可选) 指定方法名。如果不填，尝试使用函数名。匿名函数必须指定。
-func (c *Client) RegisterFunction(moduleName string, fn any, name ...string) error {
-	fnVal := reflect.ValueOf(fn)
-	fnType := fnVal.Type()
+func (c *Client) registerStructMethods(serviceName string, rcvrVal reflect.Value) error {
+	rcvrType := rcvrVal.Type()
 
-	if fnType.Kind() != reflect.Func {
+	var svc *dynamic_service
+	val, ok := c.serviceMap.Load(serviceName)
+	if ok {
+		if ds, ok := val.(*dynamic_service); ok {
+			svc = ds
+		} else {
+			return fmt.Errorf("crpc: service %s already registered as a different type", serviceName)
+		}
+	} else {
+		svc = new_dynamic_service()
+		c.serviceMap.Store(serviceName, svc)
+	}
+
+	svc.Lock()
+	defer svc.Unlock()
+
+	registeredCount := 0
+	for i := 0; i < rcvrType.NumMethod(); i++ {
+		method := rcvrType.Method(i)
+		// mType := method.Type
+		mName := method.Name
+
+		if method.PkgPath != "" {
+			continue
+		}
+
+		// 注意：rcvrVal.Method(i) 绑定了接收者，所以解析时 fnType 入参里不包含 receiver
+		// 这与 reflect.Type.Method(i).Type 不同，后者包含 receiver
+		fnVal := rcvrVal.Method(i)
+		if fnVal.Kind() != reflect.Func {
+			continue
+		}
+
+		// 使用 mType 获取 NumIn 等信息时需要注意，Method struct 里的 Type 包含了 Receiver
+		// 但我们调用 fnVal (Bound Method) 时不需要传 Receiver。
+		// 最稳妥的方式是直接分析 fnVal.Type()
+		meta, err := parseMethodMeta(mName, fnVal.Type())
+		if err != nil {
+			continue
+		}
+		meta.fn = fnVal // 绑定实际调用的函数值
+
+		svc.methods[mName] = meta
+		registeredCount++
+	}
+
+	if registeredCount == 0 {
+		return fmt.Errorf("crpc: %s has no exported methods satisfying rpc signature", serviceName)
+	}
+
+	return nil
+}
+
+func (c *Client) RegisterFunc(moduleName string, fn any, name ...string) error {
+	fnVal := reflect.ValueOf(fn)
+	if fnVal.Kind() != reflect.Func {
 		return fmt.Errorf("RegisterFunction: fn must be a function")
 	}
 
@@ -135,7 +178,6 @@ func (c *Client) RegisterFunction(moduleName string, fn any, name ...string) err
 	if len(name) > 0 && name[0] != "" {
 		methodName = name[0]
 	} else {
-		// 自动获取函数名
 		pc := fnVal.Pointer()
 		f := runtime.FuncForPC(pc)
 		if f == nil {
@@ -143,14 +185,12 @@ func (c *Client) RegisterFunction(moduleName string, fn any, name ...string) err
 		}
 		fullName := f.Name() // e.g. "pkg.MyFunc" or "pkg.func1"
 
-		// 提取最后一部分
 		if idx := strings.LastIndex(fullName, "."); idx >= 0 {
 			methodName = fullName[idx+1:]
 		} else {
 			methodName = fullName
 		}
 
-		// 去除可能的 -fm 后缀 (method value)
 		methodName = strings.TrimSuffix(methodName, "-fm")
 
 		if methodName == "" {
@@ -158,44 +198,13 @@ func (c *Client) RegisterFunction(moduleName string, fn any, name ...string) err
 		}
 	}
 
-	// 2. 分析参数
-	numIn := fnType.NumIn()
-	meta := &method_meta{
-		fn: fnVal,
+	meta, err := parseMethodMeta(methodName, fnVal.Type())
+	if err != nil {
+		return fmt.Errorf("RegisterFunction: %v", err)
 	}
+	meta.fn = fnVal
 
-	idx := 0
-	// Check Context (Context must be the first arg if present)
-	if numIn > idx && fnType.In(idx).Implements(reflect.TypeOf((*context.Context)(nil)).Elem()) {
-		meta.hasCtx = true
-		idx++
-	}
-
-	// Remaining args: (Meta, Req) or (Req)
-	remaining := numIn - idx
-	if remaining == 2 {
-		meta.hasMeta = true
-		meta.metaType = fnType.In(idx)
-		meta.reqType = fnType.In(idx + 1)
-	} else if remaining == 1 {
-		meta.reqType = fnType.In(idx)
-	} else {
-		return fmt.Errorf("RegisterFunction: invalid argument count for %s.%s, expected [Ctx], [Meta], Req", moduleName, methodName)
-	}
-
-	// 3. 校验返回值
-	numOut := fnType.NumOut()
-	if numOut == 0 || numOut > 2 {
-		return fmt.Errorf("RegisterFunction: return values for %s.%s must be (error) or (res, error)", moduleName, methodName)
-	}
-	// Last return must be error
-	if !fnType.Out(numOut - 1).Implements(reflect.TypeOf((*error)(nil)).Elem()) {
-		return fmt.Errorf("RegisterFunction: last return value for %s.%s must be error", moduleName, methodName)
-	}
-
-	// 4. 注册到 Client 的 serviceMap
 	var svc *dynamic_service
-
 	val, ok := c.serviceMap.Load(moduleName)
 	if ok {
 		if ds, ok := val.(*dynamic_service); ok {
@@ -213,4 +222,41 @@ func (c *Client) RegisterFunction(moduleName string, fn any, name ...string) err
 	svc.Unlock()
 
 	return nil
+}
+
+func parseMethodMeta(name string, fnType reflect.Type) (*method_meta, error) {
+	meta := &method_meta{}
+
+	numIn := fnType.NumIn()
+	idx := 0
+
+	if numIn > idx && fnType.In(idx).Implements(reflect.TypeOf((*context.Context)(nil)).Elem()) {
+		meta.hasCtx = true
+		idx++
+	}
+
+	remaining := numIn - idx
+	switch remaining {
+	case 2:
+		// (Meta, Req)
+		meta.hasMeta = true
+		meta.metaType = fnType.In(idx)
+		meta.reqType = fnType.In(idx + 1)
+	case 1:
+		// (Req)
+		meta.reqType = fnType.In(idx)
+	default:
+		return nil, fmt.Errorf("invalid argument count for %s, expected [Ctx], [Meta], Req", name)
+	}
+
+	numOut := fnType.NumOut()
+	if numOut == 0 || numOut > 2 {
+		return nil, fmt.Errorf("return values for %s must be (error) or (res, error)", name)
+	}
+
+	if !fnType.Out(numOut - 1).Implements(reflect.TypeOf((*error)(nil)).Elem()) {
+		return nil, fmt.Errorf("last return value for %s must be error", name)
+	}
+
+	return meta, nil
 }

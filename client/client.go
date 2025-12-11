@@ -70,7 +70,7 @@ func New(ctx context.Context, name string, addr string, opts ...*Option) (c *Cli
 		opt:  &opt,
 	}
 
-	nc, err := client.Dial(ctx, c.Name, addr, client.Options().
+	nc, err := client.Dial(ctx, c.Name, addr, &opt.Option, client.Options().
 		SetHandler(c).
 		SetOnDisconnected(c.onDisconnected).
 		SetOnConnected(c.onConnected))
