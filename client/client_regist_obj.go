@@ -9,7 +9,10 @@ import (
 )
 
 type client_handler interface {
-	HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte) (any, error)
+	// HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte) (any, error)
+	// meta 和 body 的类型从 []byte 改为 any
+	// 这样既可以传 []byte (远程)，也可以传 struct 指针 (本地)
+	HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body any) (any, error)
 }
 
 func (this *Client) Register(rcvr any) error {

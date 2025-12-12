@@ -22,7 +22,7 @@ func main() {
 func run() {
 	// ctx := context.Background()
 	// var meta = dto.Meta{Source: "client2"}
-	var req = &dto.Req{Name: "liyang"}
+	var req = &dto.Req{Name: "ll"}
 	// var req = "ddd"
 	// var res Res
 	res := comm.ResOnly(req)

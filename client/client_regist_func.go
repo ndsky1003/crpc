@@ -12,8 +12,6 @@ import (
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
 )
 
-// dynamic_service 动态服务容器，用于托管通过 RegisterFunc 或 Struct 扫描注册的函数
-// 它实现了 client_handler 接口，在 serviceMap 中扮演一个 Module 的角色
 type dynamic_service struct {
 	methods map[string]*method_meta
 	sync.RWMutex
@@ -25,26 +23,23 @@ func new_dynamic_service() *dynamic_service {
 	}
 }
 
-// method_meta 存储反射调用需要的元数据
 type method_meta struct {
 	fn reflect.Value
 
-	// 参数相关
-	hasCtx   bool         // 是否包含 context.Context 参数
-	hasMeta  bool         // 是否包含 Meta 参数
-	hasReq   bool         // 是否包含 Request 参数
-	metaType reflect.Type // Meta参数类型
-	reqType  reflect.Type // 请求参数类型
+	hasCtx   bool
+	hasMeta  bool
+	hasReq   bool
+	metaType reflect.Type
+	reqType  reflect.Type
 
-	// 返回值相关
-	returnVal bool // 是否返回结果值 (Res)
-	returnErr bool // 是否返回错误 (error)
-	valIndex  int  // 结果值在返回列表中的索引
-	errIndex  int  // 错误在返回列表中的索引
+	returnVal bool
+	returnErr bool
+	valIndex  int
+	errIndex  int
 }
 
-// HandleMsg 实现 client_handler 接口，通过反射分发调用
-func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData []byte) (any, error) {
+// HandleMsg 动态分发
+func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any) (any, error) {
 	s.RLock()
 	info, ok := s.methods[method]
 	s.RUnlock()
@@ -63,21 +58,50 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 	// 2. Arg: Meta
 	if info.hasMeta {
 		var metaVal reflect.Value
-		// 确定是创建指针还是值
-		if info.metaType.Kind() == reflect.Pointer {
-			metaVal = reflect.New(info.metaType.Elem())
-		} else {
-			metaVal = reflect.New(info.metaType).Elem()
+
+		// 检查是否为有效的本地对象 (非 nil 且 非 []byte)
+		isLocalObj := false
+		if metaData != nil {
+			if _, isBytes := metaData.([]byte); !isBytes {
+				isLocalObj = true
+			}
 		}
 
-		if len(metaData) > 0 {
-			// Unmarshal 需要传入指针
-			ptr := metaVal
-			if metaVal.Kind() != reflect.Pointer {
-				ptr = metaVal.Addr()
+		if isLocalObj {
+			// --- 本地调用优化: 直接使用对象，避免 reflect.New + Set ---
+			val := reflect.ValueOf(metaData)
+
+			// 适配类型
+			if val.Type().AssignableTo(info.metaType) {
+				metaVal = val
+			} else if val.Kind() == reflect.Pointer && val.Elem().Type().AssignableTo(info.metaType) {
+				// 想要值，给了指针 -> 解引用
+				metaVal = val.Elem()
+			} else if val.Kind() != reflect.Pointer && reflect.PointerTo(val.Type()).AssignableTo(info.metaType) {
+				// 想要指针，给了值 -> 创建指针
+				newPtr := reflect.New(val.Type())
+				newPtr.Elem().Set(val)
+				metaVal = newPtr
+			} else {
+				return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("local call meta type mismatch. want: %v, got: %v", info.metaType, val.Type()))
 			}
-			if err := coder.Unmarshal(metaCoderT, metaData, ptr.Interface()); err != nil {
-				return nil, errors.New(errors.RemoteInternal, "unmarshal meta error: "+err.Error())
+		} else {
+			// --- 远程调用: 走反序列化 ---
+			isPtr := info.metaType.Kind() == reflect.Pointer
+			if isPtr {
+				metaVal = reflect.New(info.metaType.Elem())
+			} else {
+				metaVal = reflect.New(info.metaType).Elem()
+			}
+
+			if bytes, ok := metaData.([]byte); ok && len(bytes) > 0 {
+				ptr := metaVal
+				if !isPtr {
+					ptr = metaVal.Addr()
+				}
+				if err := coder.Unmarshal(metaCoderT, bytes, ptr.Interface()); err != nil {
+					return nil, errors.New(errors.RemoteInternal, "unmarshal meta error: "+err.Error())
+				}
 			}
 		}
 		args = append(args, metaVal)
@@ -86,20 +110,51 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 	// 3. Arg: Request
 	if info.hasReq {
 		var reqVal reflect.Value
-		if info.reqType.Kind() == reflect.Pointer {
-			reqVal = reflect.New(info.reqType.Elem())
-		} else {
-			reqVal = reflect.New(info.reqType).Elem()
+
+		// 检查是否为有效的本地对象 (非 nil 且 非 []byte)
+		isLocalObj := false
+		if bodyData != nil {
+			if _, isBytes := bodyData.([]byte); !isBytes {
+				isLocalObj = true
+			}
 		}
 
-		// Unmarshal Req
-		ptr := reqVal
-		if reqVal.Kind() != reflect.Pointer {
-			ptr = reqVal.Addr()
-		}
-		if len(bodyData) > 0 {
-			if err := coder.Unmarshal(reqCoderT, bodyData, ptr.Interface()); err != nil {
-				return nil, errors.New(errors.RemoteInternal, "unmarshal req error: "+err.Error())
+		if isLocalObj {
+			// --- 本地调用优化 ---
+			val := reflect.ValueOf(bodyData)
+
+			// 适配类型
+			if val.Type().AssignableTo(info.reqType) {
+				reqVal = val
+			} else if val.Kind() == reflect.Pointer && val.Elem().Type().AssignableTo(info.reqType) {
+				// 想要值，给了指针 -> 解引用
+				reqVal = val.Elem()
+			} else if val.Kind() != reflect.Pointer && reflect.PointerTo(val.Type()).AssignableTo(info.reqType) {
+				// 想要指针，给了值 -> 创建指针
+				newPtr := reflect.New(val.Type())
+				newPtr.Elem().Set(val)
+				reqVal = newPtr
+			} else {
+				return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("local call req type mismatch. want: %v, got: %v", info.reqType, val.Type()))
+			}
+
+		} else {
+			// --- 远程调用 ---
+			isPtr := info.reqType.Kind() == reflect.Pointer
+			if isPtr {
+				reqVal = reflect.New(info.reqType.Elem())
+			} else {
+				reqVal = reflect.New(info.reqType).Elem()
+			}
+
+			if bytes, ok := bodyData.([]byte); ok && len(bytes) > 0 {
+				ptr := reqVal
+				if !isPtr {
+					ptr = reqVal.Addr()
+				}
+				if err := coder.Unmarshal(reqCoderT, bytes, ptr.Interface()); err != nil {
+					return nil, errors.New(errors.RemoteInternal, "unmarshal req error: "+err.Error())
+				}
 			}
 		}
 		args = append(args, reqVal)
@@ -108,11 +163,9 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 	// 调用函数
 	results := info.fn.Call(args)
 
-	// 处理返回结果
 	var res any
 	var err error
 
-	// 检查 Error
 	if info.returnErr {
 		errVal := results[info.errIndex]
 		if !errVal.IsNil() {
@@ -120,7 +173,6 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 		}
 	}
 
-	// 检查 Value (只有在没有错误时才需要处理返回值，或者根据业务逻辑处理)
 	if err == nil && info.returnVal {
 		resVal := results[info.valIndex]
 		if resVal.IsValid() {
@@ -159,7 +211,6 @@ func (c *Client) registerStructMethods(serviceName string, rcvrVal reflect.Value
 			continue
 		}
 
-		// 注意：rcvrVal.Method(i) 绑定了接收者，所以解析时 fnType 入参里不包含 receiver
 		fnVal := rcvrVal.Method(i)
 		if fnVal.Kind() != reflect.Func {
 			continue
@@ -167,11 +218,9 @@ func (c *Client) registerStructMethods(serviceName string, rcvrVal reflect.Value
 
 		meta, err := parseMethodMeta(mName, fnVal.Type())
 		if err != nil {
-			// 严格模式下可以报错，这里选择跳过不符合签名的方法，但在日志里最好体现
-			// fmt.Printf("crpc: method %s skipped: %v\n", mName, err)
 			continue
 		}
-		meta.fn = fnVal // 绑定实际调用的函数值
+		meta.fn = fnVal
 
 		svc.methods[mName] = meta
 		registeredCount++
@@ -190,7 +239,6 @@ func (c *Client) RegisterFunc(moduleName string, fn any, name ...string) error {
 		return fmt.Errorf("RegisterFunction: fn must be a function")
 	}
 
-	// 1. 确定方法名
 	var methodName string
 	if len(name) > 0 && name[0] != "" {
 		methodName = name[0]
@@ -200,16 +248,13 @@ func (c *Client) RegisterFunc(moduleName string, fn any, name ...string) error {
 		if f == nil {
 			return fmt.Errorf("RegisterFunction: cannot get function info, please specify method name")
 		}
-		fullName := f.Name() // e.g. "pkg.MyFunc" or "pkg.func1"
-
+		fullName := f.Name()
 		if idx := strings.LastIndex(fullName, "."); idx >= 0 {
 			methodName = fullName[idx+1:]
 		} else {
 			methodName = fullName
 		}
-
 		methodName = strings.TrimSuffix(methodName, "-fm")
-
 		if methodName == "" {
 			return fmt.Errorf("RegisterFunction: resolved method name is empty, please specify it")
 		}
@@ -241,18 +286,6 @@ func (c *Client) RegisterFunc(moduleName string, fn any, name ...string) error {
 	return nil
 }
 
-// parseMethodMeta 解析函数签名
-// 规则：
-// 入参:
-// 0个: ()
-// 1个: (Ctx) 或 (Req)
-// 2个: (Ctx, Req) 或 (Meta, Req)
-// 3个: (Ctx, Meta, Req)
-//
-// 出参:
-// 0个: ()
-// 1个: (error) 或 (Res)
-// 2个: (Res, error)
 func parseMethodMeta(name string, fnType reflect.Type) (*method_meta, error) {
 	meta := &method_meta{}
 	numIn := fnType.NumIn()
@@ -261,27 +294,19 @@ func parseMethodMeta(name string, fnType reflect.Type) (*method_meta, error) {
 
 	idx := 0
 
-	// 1. 解析第一个参数，判断是否为 Context
 	if numIn > 0 && fnType.In(0).Implements(ctxType) {
 		meta.hasCtx = true
 		idx++
 	}
 
-	// 计算剩余参数数量
 	remaining := numIn - idx
 
 	switch remaining {
 	case 0:
-		// (Ctx) 或 ()
-		// 无 Meta, 无 Req
 	case 1:
-		// (Ctx, Req) 或 (Req)
-		// 规则：剩下的这一个一定是 Req (因为如果是 Meta，后面必须跟 Req，构不成1个参数的情况)
-		// 除非你想支持 (Ctx, Meta) 但没有 Req，这在 RPC 里比较少见，通常认为单个就是 Payload
 		meta.hasReq = true
 		meta.reqType = fnType.In(idx)
 	case 2:
-		// (Ctx, Meta, Req) 或 (Meta, Req)
 		meta.hasMeta = true
 		meta.metaType = fnType.In(idx)
 		meta.hasReq = true
@@ -290,15 +315,12 @@ func parseMethodMeta(name string, fnType reflect.Type) (*method_meta, error) {
 		return nil, fmt.Errorf("invalid argument count for %s, signature mismatch", name)
 	}
 
-	// --- 解析返回值 ---
 	numOut := fnType.NumOut()
 	switch numOut {
 	case 0:
-		// func()
 		meta.returnVal = false
 		meta.returnErr = false
 	case 1:
-		// func() error 或 func() Res
 		if fnType.Out(0).Implements(errType) {
 			meta.returnErr = true
 			meta.errIndex = 0
@@ -307,8 +329,6 @@ func parseMethodMeta(name string, fnType reflect.Type) (*method_meta, error) {
 			meta.valIndex = 0
 		}
 	case 2:
-		// func() (Res, error)
-		// 强制要求第二个是 error
 		if !fnType.Out(1).Implements(errType) {
 			return nil, fmt.Errorf("last return value for %s must be error in 2-return signature", name)
 		}

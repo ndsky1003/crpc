@@ -210,7 +210,7 @@ func (c *Client) handleReq(ctx context.Context, h *header.Header, meta, body []b
 	return c.sendReply(h, res, err)
 }
 
-func (c *Client) invoke_local_func(ctx context.Context, mod, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body []byte) (res any, err error) {
+func (c *Client) invoke_local_func(ctx context.Context, mod, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body any) (res any, err error) {
 	module, ok := c.serviceMap.Load(mod)
 	if !ok {
 		err = errors.New(errors.RemoteInternal, "module not found locally")
@@ -420,37 +420,47 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 		h.Flags.With(headerflags.Debug)
 	}
 
-	bodyBytes, err := coder.Marshal(h.ReqCoderT, args)
-	if err != nil {
-		h.Release()
-		call.Error = errors.New(errors.ClientInternal, err.Error())
-		call.done()
-		return
+	// 检查本地是否有该服务
+	_, hasLocalModule := c.serviceMap.Load(module)
+	isUnicastLocal := (c.Name == service) && hasLocalModule && (ht == headertype.Req) && !h.Flags.IsBroadcast()
+	var bodyBytes []byte
+	var metaBytes []byte
+
+	// 准备本地调用需要的对象
+	var bodyObj any = args
+	var metaObj any = nil
+	if opt.Meta != nil {
+		metaObj = opt.Meta
 	}
 
-	var metaBytes []byte
-	if opt.Meta != nil {
-		if meta_bytes, err := coder.Marshal(h.MetaCoderT, opt.Meta); err != nil {
+	needNetwork := !isUnicastLocal || h.Flags.IsBroadcast()
+
+	if needNetwork {
+		var err error
+		bodyBytes, err = coder.Marshal(h.ReqCoderT, args)
+		if err != nil {
 			h.Release()
 			call.Error = errors.New(errors.ClientInternal, err.Error())
 			call.done()
 			return
-		} else {
-			metaBytes = meta_bytes
+		}
+
+		if opt.Meta != nil {
+			if b, err := coder.Marshal(h.MetaCoderT, opt.Meta); err != nil {
+				h.Release()
+				call.Error = errors.New(errors.ClientInternal, err.Error())
+				call.done()
+				return
+			} else {
+				metaBytes = b
+			}
 		}
 	}
-
 	call.seq = seq
 	call.Reply = reply
-
 	metaT := *opt.MetaCoderT
 	reqT := *opt.ReqCoderT
 	resT := *opt.ResCoderT
-
-	// 检查本地是否有该服务
-	_, hasLocalModule := c.serviceMap.Load(module)
-
-	isUnicastLocal := (c.Name == service) && hasLocalModule && (ht == headertype.Req) && !h.Flags.IsBroadcast()
 
 	// 闭包：执行本地逻辑
 	runLocal := func() {
@@ -458,7 +468,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 		// 注意：invoke_local_func 内部还是使用了反射调用生成的 HandleMsg，
 		// 如果追求极致性能，HandleMsg 应该接受 any 类型的 args，目前架构下为了兼容仍传 bytes。
 		// 但返回值 res 是 interface{}，不需要反序列化。
-		res, err := c.invoke_local_func(ctx, module, method, metaT, reqT, metaBytes, bodyBytes)
+		res, err := c.invoke_local_func(ctx, module, method, metaT, reqT, metaObj, bodyObj)
 
 		if h.Flags.IsBroadcast() {
 			// 广播模式：构造结果推入 channel
@@ -499,10 +509,10 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 				// 利用反射直接赋值，跳过 Unmarshal
 				// 假设 call.Reply 是指针，res 是值或指针
 				destVal := reflect.ValueOf(call.Reply)
-				if destVal.Kind() == reflect.Ptr && !destVal.IsNil() {
+				if destVal.Kind() == reflect.Pointer && !destVal.IsNil() {
 					srcVal := reflect.ValueOf(res)
 					// 处理指针解引用
-					if srcVal.Kind() == reflect.Ptr {
+					if srcVal.Kind() == reflect.Pointer {
 						srcVal = srcVal.Elem()
 					}
 					// 确保目标也是解引用后的值

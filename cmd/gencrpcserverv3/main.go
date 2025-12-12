@@ -17,7 +17,6 @@ import (
 	"text/template"
 )
 
-// CLI 参数定义
 var (
 	suffix        string
 	file_path     string
@@ -32,37 +31,29 @@ func init() {
 	flag.StringVar(&out_dir, "out_dir", "", "输出目录（可选）")
 }
 
-// ImportInfo 存储导入信息
 type ImportInfo struct {
 	Alias      string
 	Path       string
 	PrintAlias bool
 }
 
-// MethodInfo 存储方法的元数据
 type MethodInfo struct {
-	Name string
-
-	// 参数相关
+	Name     string
 	HasCtx   bool
 	HasMeta  bool
-	MetaType string // 原始类型字符串，e.g. "*Meta" or "Meta"
+	MetaType string
 	HasReq   bool
-	ReqType  string // 原始类型字符串，e.g. "*Req" or "string"
-
-	// 返回值相关
-	HasRes  bool
-	ResType string // 原始类型字符串
-	HasErr  bool
+	ReqType  string
+	HasRes   bool
+	ResType  string
+	HasErr   bool
 }
 
-// StructInfo 存储结构体及其对应的方法
 type StructInfo struct {
 	Name    string
 	Methods []MethodInfo
 }
 
-// TemplateData 模板数据
 type TemplateData struct {
 	Package string
 	Imports map[string]*ImportInfo
@@ -72,7 +63,6 @@ type TemplateData struct {
 func main() {
 	flag.Parse()
 
-	// --- 路径处理逻辑 ---
 	if file_path == "" {
 		dir, err := os.Getwd()
 		if err != nil {
@@ -106,9 +96,7 @@ func main() {
 	}
 
 	out_file_path := filepath.Join(out_dir, filename_new)
-	// ----------------------------------------
 
-	// 解析 AST
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, file_path, nil, parser.ParseComments)
 	if err != nil {
@@ -118,7 +106,6 @@ func main() {
 	packageName := node.Name.Name
 	structMap := make(map[string][]MethodInfo)
 
-	// 收集文件中的所有 import
 	allImports := make(map[string]*ImportInfo)
 	ast.Inspect(node, func(n ast.Node) bool {
 		if imp, ok := n.(*ast.ImportSpec); ok {
@@ -128,21 +115,17 @@ func main() {
 		return true
 	})
 
-	// 收集代码生成需要的 import
 	neededImports := make(map[string]*ImportInfo)
-	// 基础依赖
 	neededImports["context"] = &ImportInfo{Path: "\"context\"", Alias: "context"}
 	neededImports["errors"] = &ImportInfo{Path: "\"errors\"", Alias: "errors"}
 	neededImports["coder"] = &ImportInfo{Path: "\"github.com/ndsky1003/crpc/v3/coder\"", Alias: "coder"}
 
-	// 遍历 AST
 	ast.Inspect(node, func(n ast.Node) bool {
 		fn, ok := n.(*ast.FuncDecl)
 		if !ok || fn.Recv == nil {
 			return true
 		}
 
-		// 获取接收者类型名称
 		recvType := ""
 		switch t := fn.Recv.List[0].Type.(type) {
 		case *ast.StarExpr:
@@ -157,17 +140,13 @@ func main() {
 			return true
 		}
 
-		// 忽略未导出方法和 HandleMsg 自身
 		if !fn.Name.IsExported() || fn.Name.Name == "HandleMsg" {
 			return true
 		}
 
-		// 分析方法签名
 		info, isValid := analyzeMethod(fn)
 		if isValid {
 			structMap[recvType] = append(structMap[recvType], info)
-
-			// 收集依赖的包 (Req, Meta, Res)
 			collectImports(info.ReqType, allImports, neededImports)
 			collectImports(info.MetaType, allImports, neededImports)
 			collectImports(info.ResType, allImports, neededImports)
@@ -175,7 +154,6 @@ func main() {
 		return true
 	})
 
-	// 排序保证生成稳定性
 	var structs []StructInfo
 	for name, methods := range structMap {
 		structs = append(structs, StructInfo{
@@ -192,7 +170,6 @@ func main() {
 		return
 	}
 
-	// 生成代码
 	data := TemplateData{
 		Package: packageName,
 		Imports: neededImports,
@@ -200,12 +177,10 @@ func main() {
 	}
 	code := generateCode(data)
 
-	// 写入文件
 	if err := os.WriteFile(out_file_path, code, 0644); err != nil {
 		log.Fatalf("Write file error: %v", err)
 	}
 
-	// 使用 goimports 格式化
 	_ = exec.Command("goimports", "-w", out_file_path).Run()
 }
 
@@ -247,12 +222,9 @@ func collectImports(typeStr string, allImports map[string]*ImportInfo, neededImp
 	}
 }
 
-// analyzeMethod 分析函数签名是否符合 RPC 要求
-// 支持: (Ctx?, Meta?, Req?) -> (Res?, Err?)
 func analyzeMethod(fn *ast.FuncDecl) (MethodInfo, bool) {
 	info := MethodInfo{Name: fn.Name.Name}
 
-	// 1. 分析参数 (Inputs)
 	params := fn.Type.Params.List
 	var args []*ast.Field
 	for _, p := range params {
@@ -266,7 +238,6 @@ func analyzeMethod(fn *ast.FuncDecl) (MethodInfo, bool) {
 	}
 
 	idx := 0
-	// 检查 Context
 	if len(args) > 0 {
 		tStr := exprToString(args[0].Type)
 		if strings.Contains(tStr, "Context") {
@@ -278,23 +249,18 @@ func analyzeMethod(fn *ast.FuncDecl) (MethodInfo, bool) {
 	remaining := len(args) - idx
 	switch remaining {
 	case 0:
-		// 无 Meta, 无 Req
 	case 1:
-		// (Req)
 		info.HasReq = true
 		info.ReqType = exprToString(args[idx].Type)
 	case 2:
-		// (Meta, Req)
 		info.HasMeta = true
 		info.MetaType = exprToString(args[idx].Type)
 		info.HasReq = true
 		info.ReqType = exprToString(args[idx+1].Type)
 	default:
-		// 不支持 > 2 个非 Context 参数
 		return info, false
 	}
 
-	// 2. 分析返回值 (Outputs)
 	var results []*ast.Field
 	if fn.Type.Results != nil {
 		results = fn.Type.Results.List
@@ -303,7 +269,6 @@ func analyzeMethod(fn *ast.FuncDecl) (MethodInfo, bool) {
 
 	switch resLen {
 	case 0:
-		// 无返回值
 	case 1:
 		tStr := exprToString(results[0].Type)
 		if tStr == "error" {
@@ -313,7 +278,6 @@ func analyzeMethod(fn *ast.FuncDecl) (MethodInfo, bool) {
 			info.ResType = tStr
 		}
 	case 2:
-		// (Res, error)
 		if exprToString(results[1].Type) != "error" {
 			return info, false
 		}
@@ -333,6 +297,8 @@ func exprToString(expr ast.Expr) string {
 	return buf.String()
 }
 
+// [修改] 修复了模板逻辑：无论方法参数是指针还是值，req 变量本身都是值类型，
+// 因此从 bodyData 获取数据时，必须始终赋值为值（如果是指针则解引用）。
 func generateCode(data TemplateData) []byte {
 	tpl := `// Code generated by gencrpcserverv3. DO NOT EDIT.
 package {{.Package}}
@@ -345,17 +311,31 @@ import (
 
 {{- range .Structs}}
 
-func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaBytes, bodyBytes []byte) (any, error) {
+func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any) (any, error) {
 	switch method {
 	{{- range .Methods}}
 	case "{{.Name}}":
 		// 1. 准备 Req
 		{{- if .HasReq}}
 		var req {{TypeClean .ReqType}}
-		// 为了支持可选反序列化 (e.g. string/[]byte 或空包)，判空
-		if len(bodyBytes) > 0 {
-			if err := coder.Unmarshal(reqCoderT, bodyBytes, &req); err != nil {
-				return nil, err
+		
+		if b, ok := bodyData.([]byte); ok {
+			// 远程调用 (Bytes)
+			if len(b) > 0 {
+				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+					return nil, err
+				}
+			}
+		} else if bodyData != nil {
+			// 本地调用 (Object)
+			if v, ok := bodyData.(*{{TypeClean .ReqType}}); ok {
+				if v != nil {
+					req = *v
+				}
+			} else if v, ok := bodyData.({{TypeClean .ReqType}}); ok {
+				req = v
+			} else {
+				return nil, errors.New("local call type mismatch for {{.Name}} arg: req")
 			}
 		}
 		{{- end}}
@@ -363,9 +343,21 @@ func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT cod
 		// 2. 准备 Meta
 		{{- if .HasMeta}}
 		var meta {{TypeClean .MetaType}}
-		if len(metaBytes) > 0 {
-			if err := coder.Unmarshal(metaCoderT, metaBytes, &meta); err != nil {
-				return nil, err
+		if b, ok := metaData.([]byte); ok {
+			if len(b) > 0 {
+				if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
+					return nil, err
+				}
+			}
+		} else if metaData != nil {
+			if v, ok := metaData.(*{{TypeClean .MetaType}}); ok {
+				if v != nil {
+					meta = *v
+				}
+			} else if v, ok := metaData.({{TypeClean .MetaType}}); ok {
+				meta = v
+			} else {
+				return nil, errors.New("local call type mismatch for {{.Name}} arg: meta")
 			}
 		}
 		{{- end}}
@@ -399,8 +391,6 @@ func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT cod
 `
 
 	funcMap := template.FuncMap{
-		// 去除指针符号，获取底层值类型名称
-		// e.g. "*Req" -> "Req", "string" -> "string"
 		"TypeClean": func(t string) string {
 			return strings.TrimPrefix(t, "*")
 		},

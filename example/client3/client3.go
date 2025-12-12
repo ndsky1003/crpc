@@ -5,8 +5,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ndsky1003/crpc/v3/client"
+	"github.com/ndsky1003/crpc/v3/example/comm"
 	"github.com/ndsky1003/crpc/v3/example/dto"
 )
 
@@ -62,7 +64,7 @@ func (s *MyStructService) ReqOnly(req *dto.Req) (*dto.Res, error) {
 // 只返回结果: (Req) -> (Res)
 // 注意：如果发生错误框架层无法捕获，仅用于必定成功的逻辑
 func (s *MyStructService) ResOnly(req *dto.Req) *dto.Res {
-	fmt.Printf("[Struct] ResOnly Called: Req=%v\n", req)
+	fmt.Printf("[Struct] ResOnly Called: Req=%v,%p\n", req, req)
 	return &dto.Res{Msg: "OK from Struct.ResOnly"}
 }
 
@@ -100,6 +102,7 @@ func main() {
 		fmt.Println("dial error:", err)
 		return
 	}
+	comm.Default_lient = c
 	fmt.Println("Client started...")
 
 	// 2. 实例化服务对象
@@ -114,9 +117,25 @@ func main() {
 		fmt.Println("Registered 'MyService' successfully")
 	}
 
+	time.AfterFunc(5*time.Second, run)
+
 	// 方式 B: 使用 Register 自动推导服务名 (通常是结构体名 "MyStructService")
 	// if err := c.Register(svc); err != nil { ... }
 
 	// 阻塞以保持服务运行
 	select {}
+}
+
+func run() {
+	// ctx := context.Background()
+	// var meta = dto.Meta{Source: "client2"}
+	var req = &dto.Req{Name: "ll"}
+	// var req = "ddd"
+	// var res Res
+	fmt.Printf("req pointer:%p", req)
+	res := comm.ResOnly(req)
+	fmt.Println(res)
+	// err := c.Call(context.Background(), "client1", "cc.FnCtxOnly", req, &res, client.Options().SetMeta(meta).SetTraceID("traceid-client2-001"))
+	// fmt.Println("client2:", " call result:", res, err)
+
 }
