@@ -33,13 +33,19 @@ func init() {
 
 // MethodInfo 存储方法的元数据
 type MethodInfo struct {
-	Name      string
-	HasCtx    bool
-	MetaType  string // e.g., "*Meta" or empty
-	ReqType   string // e.g., "*PlayerInfoReq"
-	ResType   string // e.g., "*PlayerInfoRes" or empty
-	IsPointer bool   // Req is pointer?
-	HasReturn bool   // True if returns (Res, error), False if returns (error)
+	Name string
+
+	// 参数相关
+	HasCtx   bool
+	HasMeta  bool
+	MetaType string // 原始类型字符串，e.g. "*Meta" or "Meta"
+	HasReq   bool
+	ReqType  string // 原始类型字符串，e.g. "*Req" or "string"
+
+	// 返回值相关
+	HasRes  bool
+	ResType string // 原始类型字符串
+	HasErr  bool
 }
 
 // StructInfo 存储结构体及其对应的方法
@@ -51,7 +57,7 @@ type StructInfo struct {
 func main() {
 	flag.Parse()
 
-	// --- 路径处理逻辑 (集成您提供的代码) ---
+	// --- 路径处理逻辑 ---
 	if file_path == "" {
 		dir, err := os.Getwd()
 		if err != nil {
@@ -59,7 +65,6 @@ func main() {
 		}
 		filename := os.Getenv("GOFILE")
 		if filename == "" {
-			// 如果不是 go generate 调用且没传参，直接返回不报错
 			return
 		}
 		file_path = filepath.Join(dir, filename)
@@ -160,36 +165,15 @@ func main() {
 }
 
 // analyzeMethod 分析函数签名是否符合 RPC 要求
+// 支持: (Ctx?, Meta?, Req?) -> (Res?, Err?)
 func analyzeMethod(fn *ast.FuncDecl) (MethodInfo, bool) {
 	info := MethodInfo{Name: fn.Name.Name}
 
-	// 1. 分析返回值
-	if fn.Type.Results == nil || len(fn.Type.Results.List) == 0 {
-		return info, false
-	}
-	results := fn.Type.Results.List
-	if len(results) > 2 {
-		return info, false
-	}
-
-	// 最后一个返回值必须是 error
-	lastResult := results[len(results)-1]
-	if exprToString(lastResult.Type) != "error" {
-		return info, false
-	}
-
-	if len(results) == 2 {
-		info.HasReturn = true // (Res, error)
-		info.ResType = exprToString(results[0].Type)
-	} else {
-		info.HasReturn = false // (error)
-	}
-
-	// 2. 分析参数
+	// 1. 分析参数 (Inputs)
 	params := fn.Type.Params.List
-	args := make([]*ast.Field, 0, len(params))
+	var args []*ast.Field
 	for _, p := range params {
-		if len(p.Names) > 1 {
+		if len(p.Names) > 0 {
 			for range p.Names {
 				args = append(args, p)
 			}
@@ -198,34 +182,63 @@ func analyzeMethod(fn *ast.FuncDecl) (MethodInfo, bool) {
 		}
 	}
 
-	if len(args) == 0 {
-		return info, false
-	}
-
+	idx := 0
 	// 检查 Context
-	firstType := exprToString(args[0].Type)
-	if strings.Contains(firstType, "Context") {
-		info.HasCtx = true
-		args = args[1:]
+	if len(args) > 0 {
+		tStr := exprToString(args[0].Type)
+		if strings.Contains(tStr, "Context") {
+			info.HasCtx = true
+			idx++
+		}
 	}
 
-	if len(args) == 0 || len(args) > 2 {
+	remaining := len(args) - idx
+	switch remaining {
+	case 0:
+		// 无 Meta, 无 Req
+	case 1:
+		// (Req)
+		info.HasReq = true
+		info.ReqType = exprToString(args[idx].Type)
+	case 2:
+		// (Meta, Req)
+		info.HasMeta = true
+		info.MetaType = exprToString(args[idx].Type)
+		info.HasReq = true
+		info.ReqType = exprToString(args[idx+1].Type)
+	default:
+		// 不支持 > 2 个非 Context 参数
 		return info, false
 	}
 
-	if len(args) == 2 {
-		// [Meta, Req]
-		info.MetaType = exprToString(args[0].Type)
-		info.ReqType = exprToString(args[1].Type)
-		if _, ok := args[1].Type.(*ast.StarExpr); ok {
-			info.IsPointer = true
+	// 2. 分析返回值 (Outputs)
+	var results []*ast.Field
+	if fn.Type.Results != nil {
+		results = fn.Type.Results.List
+	}
+	resLen := len(results)
+
+	switch resLen {
+	case 0:
+		// 无返回值
+	case 1:
+		tStr := exprToString(results[0].Type)
+		if tStr == "error" {
+			info.HasErr = true
+		} else {
+			info.HasRes = true
+			info.ResType = tStr
 		}
-	} else if len(args) == 1 {
-		// [Req]
-		info.ReqType = exprToString(args[0].Type)
-		if _, ok := args[0].Type.(*ast.StarExpr); ok {
-			info.IsPointer = true
+	case 2:
+		// (Res, error)
+		if exprToString(results[1].Type) != "error" {
+			return info, false
 		}
+		info.HasRes = true
+		info.ResType = exprToString(results[0].Type)
+		info.HasErr = true
+	default:
+		return info, false
 	}
 
 	return info, true
@@ -253,14 +266,20 @@ func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT cod
 	switch method {
 	{{- range .Methods}}
 	case "{{.Name}}":
-		var req {{ReqTypeClean .}}
-		{{- if .MetaType}}
-		var meta {{MetaTypeClean .}}
-		{{- end}}
-		if err := coder.Unmarshal(reqCoderT, bodyBytes, &req); err != nil {
-			return nil, err
+		// 1. 准备 Req
+		{{- if .HasReq}}
+		var req {{TypeClean .ReqType}}
+		// 为了支持可选反序列化 (e.g. string/[]byte 或空包)，判空
+		if len(bodyBytes) > 0 {
+			if err := coder.Unmarshal(reqCoderT, bodyBytes, &req); err != nil {
+				return nil, err
+			}
 		}
-		{{- if .MetaType}}
+		{{- end}}
+
+		// 2. 准备 Meta
+		{{- if .HasMeta}}
+		var meta {{TypeClean .MetaType}}
 		if len(metaBytes) > 0 {
 			if err := coder.Unmarshal(metaCoderT, metaBytes, &meta); err != nil {
 				return nil, err
@@ -268,19 +287,26 @@ func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT cod
 		}
 		{{- end}}
 
-		{{- if .HasReturn}}
-		return c.{{.Name}}(
-			{{- if .HasCtx}}ctx, {{end}}
-			{{- if .MetaType}}{{if isPointer .MetaType}}&{{end}}meta, {{end}}
-			{{- if isPointer .ReqType}}&{{end}}req,
-		)
+		// 3. 调用方法
+		{{- if .HasRes}}
+		res{{if .HasErr}}, err{{end}} := c.{{.Name}}({{MethodArgs .}})
 		{{- else}}
-		return nil, c.{{.Name}}(
-			{{- if .HasCtx}}ctx, {{end}}
-			{{- if .MetaType}}{{if isPointer .MetaType}}&{{end}}meta, {{end}}
-			{{- if isPointer .ReqType}}&{{end}}req,
-		)
+		{{if .HasErr}}err := {{end}} c.{{.Name}}({{MethodArgs .}})
 		{{- end}}
+
+		// 4. 处理返回值
+		{{- if .HasErr}}
+		if err != nil {
+			return nil, err
+		}
+		{{- end}}
+
+		{{- if .HasRes}}
+		return {{if isPointer .ResType}}res{{else}}&res{{end}}, nil
+		{{- else}}
+		return nil, nil
+		{{- end}}
+
 	{{- end}}
 	default:
 		return nil, errors.New("unknown method: " + method)
@@ -290,14 +316,34 @@ func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT cod
 `
 
 	funcMap := template.FuncMap{
-		"ReqTypeClean": func(m MethodInfo) string {
-			return strings.TrimPrefix(m.ReqType, "*")
-		},
-		"MetaTypeClean": func(m MethodInfo) string {
-			return strings.TrimPrefix(m.MetaType, "*")
+		// 去除指针符号，获取底层值类型名称
+		// e.g. "*Req" -> "Req", "string" -> "string"
+		"TypeClean": func(t string) string {
+			return strings.TrimPrefix(t, "*")
 		},
 		"isPointer": func(t string) bool {
 			return strings.HasPrefix(t, "*")
+		},
+		"MethodArgs": func(m MethodInfo) string {
+			var args []string
+			if m.HasCtx {
+				args = append(args, "ctx")
+			}
+			if m.HasMeta {
+				if strings.HasPrefix(m.MetaType, "*") {
+					args = append(args, "&meta")
+				} else {
+					args = append(args, "meta")
+				}
+			}
+			if m.HasReq {
+				if strings.HasPrefix(m.ReqType, "*") {
+					args = append(args, "&req")
+				} else {
+					args = append(args, "req")
+				}
+			}
+			return strings.Join(args, ", ")
 		},
 	}
 
@@ -313,7 +359,9 @@ func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT cod
 
 	src, err := format.Source(buf.Bytes())
 	if err != nil {
+		fmt.Println("--- Generated Code (Format Failed) ---")
 		fmt.Println(buf.String())
+		fmt.Println("--------------------------------------")
 		log.Fatalf("Format error: %v", err)
 	}
 	return src

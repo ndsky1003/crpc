@@ -18,7 +18,7 @@ import (
 	"text/template"
 )
 
-const VERSION = "v3.5.3"
+const VERSION = "v3.6.2"
 
 const (
 	Annotation_IsSkip   = "IsSkip"
@@ -30,10 +30,9 @@ const (
 )
 
 const (
-	CallType_Call      = "Call"
-	CallType_Broadcast = "Broadcast"
-	CallType_Go        = "Go"
-	CallType_Send      = "Send"
+	CallType_Call = "Call"
+	CallType_Go   = "Go"
+	CallType_Send = "Send"
 )
 
 var (
@@ -80,6 +79,7 @@ func main() {
 	methodMap := make(map[string][]MethodEntry)
 	neededImports := make(map[string]*ImportInfo)
 
+	// 基础依赖
 	neededImports["context"] = &ImportInfo{Path: "\"context\""}
 	neededImports["client"] = &ImportInfo{Path: "\"github.com/ndsky1003/crpc/v3/client\""}
 
@@ -89,6 +89,7 @@ func main() {
 			return true
 		}
 
+		// 获取接收者类型
 		recvType := ""
 		switch t := fn.Recv.List[0].Type.(type) {
 		case *ast.StarExpr:
@@ -107,6 +108,7 @@ func main() {
 			return true
 		}
 
+		// 分析方法签名
 		info, ok := analyzeMethod(fn, recvType)
 		if ok {
 			entry := MethodEntry{
@@ -115,6 +117,7 @@ func main() {
 			}
 			methodMap[info.GenName] = append(methodMap[info.GenName], entry)
 
+			// 收集依赖
 			collectImports(info.ReqType, imports, neededImports)
 			collectImports(info.ResType, imports, neededImports)
 			collectImports(info.MetaType, imports, neededImports)
@@ -170,6 +173,7 @@ type ImportInfo struct {
 	Path  string
 }
 
+// MethodInfo 存储方法的元数据
 type MethodInfo struct {
 	OriginalName string
 	GenName      string
@@ -179,11 +183,17 @@ type MethodInfo struct {
 	ClientVar    string
 	CallTypes    []string
 
-	HasCtx    bool
-	MetaType  string
-	ReqType   string
-	ResType   string
-	HasReturn bool
+	// 入参标记
+	HasCtx   bool
+	HasMeta  bool
+	HasReq   bool
+	MetaType string
+	ReqType  string
+
+	// 出参标记
+	HasRes  bool
+	HasErr  bool
+	ResType string
 }
 
 type MethodEntry struct {
@@ -197,21 +207,45 @@ type GenFuncInfo struct {
 	MethodInfo
 }
 
-// ReturnSignature 根据 CallType 决定返回值
-// Broadcast 和 Send 现在只返回 error，因为结果通过回调处理或不需要
+// ParamsSignature 生成参数列表字符串
+func (m GenFuncInfo) ParamsSignature() string {
+	var parts []string
+	if m.HasCtx {
+		parts = append(parts, "ctx context.Context")
+	}
+	if m.HasMeta {
+		parts = append(parts, fmt.Sprintf("meta %s", m.MetaType))
+	}
+	if m.HasReq {
+		parts = append(parts, fmt.Sprintf("req %s", m.ReqType))
+	}
+	// 永远追加可变参数 opts
+	parts = append(parts, "opts ...*client.Option")
+	return strings.Join(parts, ", ")
+}
+
+// ReturnSignature 生成返回值列表字符串
 func (m GenFuncInfo) ReturnSignature() string {
 	switch m.CallType {
 	case CallType_Go:
 		return "*client.Call"
 	case CallType_Send:
 		return "error"
-	case CallType_Broadcast:
-		return "error"
 	default: // Call
-		if m.HasReturn {
-			return fmt.Sprintf("(%s, error)", m.ResType)
+		var parts []string
+		if m.HasRes {
+			parts = append(parts, m.ResType)
 		}
-		return "error"
+		if m.HasErr {
+			parts = append(parts, "error")
+		}
+		if len(parts) == 0 {
+			return ""
+		}
+		if len(parts) == 1 {
+			return parts[0]
+		}
+		return fmt.Sprintf("(%s, %s)", parts[0], parts[1])
 	}
 }
 
@@ -219,13 +253,6 @@ type TemplateData struct {
 	Package string
 	Imports map[string]*ImportInfo
 	Funcs   []GenFuncInfo
-}
-
-func toGenFunc(entry MethodEntry, finalName string) GenFuncInfo {
-	return GenFuncInfo{
-		FuncName:   finalName,
-		MethodInfo: entry.Info,
-	}
 }
 
 func handlePaths() {
@@ -307,6 +334,7 @@ func getAnnotations(doc *ast.CommentGroup) map[string]string {
 	return res
 }
 
+// analyzeMethod 核心分析逻辑
 func analyzeMethod(fn *ast.FuncDecl, structName string) (MethodInfo, bool) {
 	svc := structName
 	if globalService != "" {
@@ -328,6 +356,7 @@ func analyzeMethod(fn *ast.FuncDecl, structName string) (MethodInfo, bool) {
 		CallTypes:    []string{CallType_Call},
 	}
 
+	// 1. 处理注解
 	annotations := getAnnotations(fn.Doc)
 	if val, ok := annotations[Annotation_IsSkip]; ok && (val == "true" || val == "1") {
 		return info, false
@@ -350,7 +379,7 @@ func analyzeMethod(fn *ast.FuncDecl, structName string) (MethodInfo, bool) {
 		for _, part := range parts {
 			t := strings.TrimSpace(part)
 			switch t {
-			case CallType_Call, CallType_Broadcast, CallType_Go, CallType_Send:
+			case CallType_Call, CallType_Go, CallType_Send:
 				types = append(types, t)
 			}
 		}
@@ -359,8 +388,9 @@ func analyzeMethod(fn *ast.FuncDecl, structName string) (MethodInfo, bool) {
 		}
 	}
 
+	// 2. 分析参数 (Inputs)
 	params := fn.Type.Params.List
-	args := make([]*ast.Field, 0)
+	var args []*ast.Field
 	for _, p := range params {
 		if len(p.Names) > 0 {
 			for range p.Names {
@@ -371,38 +401,64 @@ func analyzeMethod(fn *ast.FuncDecl, structName string) (MethodInfo, bool) {
 		}
 	}
 
-	if len(args) == 0 {
+	idx := 0
+	// 检查第一个参数是否为 Context
+	if len(args) > 0 {
+		tStr := exprToString(args[0].Type)
+		if strings.Contains(tStr, "Context") {
+			info.HasCtx = true
+			idx++
+		}
+	}
+
+	remaining := len(args) - idx
+	switch remaining {
+	case 0:
+		// 无 Meta, 无 Req
+	case 1:
+		// 只有 1 个参数，默认为 Req
+		info.HasReq = true
+		info.ReqType = exprToString(args[idx].Type)
+	case 2:
+		// 有 2 个参数，默认为 Meta, Req
+		info.HasMeta = true
+		info.MetaType = exprToString(args[idx].Type)
+		info.HasReq = true
+		info.ReqType = exprToString(args[idx+1].Type)
+	default:
+		// 不支持 > 2 个非 Context 参数
 		return info, false
 	}
 
-	firstType := exprToString(args[0].Type)
-	if strings.Contains(firstType, "Context") {
-		info.HasCtx = true
-		args = args[1:]
+	// 3. 分析返回值 (Outputs)
+	// [修复] 增加判空保护，防止 fn.Type.Results 为 nil 时 panic
+	var results []*ast.Field
+	if fn.Type.Results != nil {
+		results = fn.Type.Results.List
 	}
+	resLen := len(results)
 
-	if len(args) == 2 {
-		info.MetaType = exprToString(args[0].Type)
-		info.ReqType = exprToString(args[1].Type)
-	} else if len(args) == 1 {
-		info.ReqType = exprToString(args[0].Type)
-	} else {
-		return info, false
-	}
-
-	results := fn.Type.Results.List
-	if len(results) == 0 {
-		return info, false
-	}
-	lastRes := results[len(results)-1]
-	if exprToString(lastRes.Type) != "error" {
-		return info, false
-	}
-
-	if len(results) == 2 {
-		info.HasReturn = true
+	switch resLen {
+	case 0:
+		// 无返回值
+	case 1:
+		tStr := exprToString(results[0].Type)
+		if tStr == "error" {
+			info.HasErr = true
+		} else {
+			info.HasRes = true
+			info.ResType = tStr
+		}
+	case 2:
+		// 强制要求 (Res, error)
+		lastType := exprToString(results[1].Type)
+		if lastType != "error" {
+			return info, false
+		}
+		info.HasRes = true
 		info.ResType = exprToString(results[0].Type)
-	} else if len(results) > 2 {
+		info.HasErr = true
+	default:
 		return info, false
 	}
 
@@ -428,33 +484,67 @@ import (
 {{- range .Funcs}}
 
 // {{.FuncName}} invokes {{.Service}}.{{.Module}}.{{.Method}}
-func {{.FuncName}}(ctx context.Context, {{if .MetaType}}meta {{.MetaType}}, {{end}}req {{.ReqType}}, opts ...*client.Option) {{.ReturnSignature}} {
-	{{- if or (eq .CallType "Call") (eq .CallType "Go") }}
-	{{- if .HasReturn}}
-	var res {{ResTypeClean .}}
-	{{- end}}
-	{{- end}}
-	
-	{{- if .MetaType}}
+func {{.FuncName}}({{.ParamsSignature}}) {{.ReturnSignature}} {
+	// 1. 构建动态参数
+	var argsList []any
+	_ = argsList // 防止未使用报错
+
+	// Meta 处理 (放入 opts)
+	{{- if .HasMeta}}
 	opts = append(opts, client.Options().SetMeta(meta))
 	{{- end}}
 
+	// Req 处理
+	{{- if .HasReq}}
+	var reqBody any = req
+	{{- else}}
+	var reqBody any = nil
+	{{- end}}
+
+	// Ctx 处理
+	{{- if not .HasCtx}}
+	ctx := context.Background()
+	{{- end}}
+
+	// 2. 根据 CallType 分发调用
 	{{- if eq .CallType "Go"}}
-	return {{.ClientVar}}.Go(ctx, "{{.Service}}", "{{.Module}}.{{.Method}}", req, {{if .HasReturn}}&res{{else}}nil{{end}}, opts...)
-	
+		// Go 模式：异步调用，返回 Call 对象
+		{{- if .HasRes}}
+		var res {{ResTypeClean .}}
+		return {{.ClientVar}}.Go(ctx, "{{.Service}}", "{{.Module}}.{{.Method}}", reqBody, &res, opts...)
+		{{- else}}
+		return {{.ClientVar}}.Go(ctx, "{{.Service}}", "{{.Module}}.{{.Method}}", reqBody, nil, opts...)
+		{{- end}}
+
 	{{- else if eq .CallType "Send"}}
-	return {{.ClientVar}}.Send(ctx, "{{.Service}}", "{{.Module}}.{{.Method}}", req, opts...)
-	
-	{{- else if eq .CallType "Broadcast"}}
-	return {{.ClientVar}}.Broadcast(ctx, "{{.Service}}", "{{.Module}}.{{.Method}}", req, opts...)
+		// Send 模式：单向发送
+		return {{.ClientVar}}.Send(ctx, "{{.Service}}", "{{.Module}}.{{.Method}}", reqBody, opts...)
 
 	{{- else}}
-	err := {{.ClientVar}}.Call(ctx, "{{.Service}}", "{{.Module}}.{{.Method}}", req, {{if .HasReturn}}&res{{else}}nil{{end}}, opts...)
-	{{- if .HasReturn}}
-	return {{if isPointer .ResType}}&res{{else}}res{{end}}, err
-	{{- else}}
-	return err
-	{{- end}}
+		// Call 模式：同步等待
+		{{- if .HasRes}}
+		var res {{ResTypeClean .}}
+		var resPtr any = &res
+		{{- else}}
+		var resPtr any = nil
+		{{- end}}
+
+		// [修复] 根据是否需要 Error 返回值，动态生成接收变量
+		// 如果只有返回值没有 error，使用 _ 忽略错误，防止编译报错 "err declared but not used"
+		{{if .HasErr}}err{{else}}_{{end}} := {{.ClientVar}}.Call(ctx, "{{.Service}}", "{{.Module}}.{{.Method}}", reqBody, resPtr, opts...)
+
+		// 3. 处理返回值
+		{{- if and .HasRes .HasErr}}
+			return {{if isPointer .ResType}}&res{{else}}res{{end}}, err
+		{{- else if .HasErr}}
+			return err
+		{{- else if .HasRes}}
+			// 只有返回值，忽略错误
+			return {{if isPointer .ResType}}&res{{else}}res{{end}}
+		{{- else}}
+			// 无返回值
+			return
+		{{- end}}
 
 	{{- end}}
 }
@@ -485,7 +575,6 @@ func {{.FuncName}}(ctx context.Context, {{if .MetaType}}meta {{.MetaType}}, {{en
 		log.Fatalf("Write file error: %v", err)
 	}
 
-	exec.Command("goimports", "-w", outPath).Run()
-	exec.Command("gofmt", "-w", outPath).Run()
-
+	_ = exec.Command("goimports", "-w", outPath).Run()
+	_ = exec.Command("gofmt", "-w", outPath).Run()
 }
