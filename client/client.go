@@ -185,6 +185,7 @@ func (c *Client) HandleMsg(data []byte) error {
 		go c.handleReq(ctx, h, metaCopy, bodyCopy)
 	case h.Type.IsRes():
 		if h.Flags.IsBroadcast() {
+			//轻操作（仅转发），怕乱序（EOS竞态），所以同步
 			if err := c.handleRes(ctx, h, bodyCopy); err != nil {
 				log.Println("handleRes :", err)
 			}
