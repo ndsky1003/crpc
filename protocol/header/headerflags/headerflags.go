@@ -4,11 +4,12 @@ type T uint8
 
 const None T = 0
 const (
-	Debug     T = 1 << iota //这条数据是否打开调试日志
-	UUID                    //表示头文件信息里是否携带UUID,转发回路的时候需要用到,需要知道回到哪个UUID,UUID标识一个tcpid
-	EOS                     //End-Of-Stream
-	Broadcast               //这条是广播消息
-	Handshake               //握手/鉴权
+	Debug         T = 1 << iota //这条数据是否打开调试日志
+	UUID                        //表示头文件信息里是否携带UUID,转发回路的时候需要用到,需要知道回到哪个UUID,UUID标识一个tcpid
+	EOS                         //End-Of-Stream
+	Broadcast                   //这条是广播消息
+	Handshake                   //握手/鉴权
+	ExcludeSender               //标记发送者已经处理了该请求，服务端广播时应排除发送者
 )
 
 func (f *T) Add(flag T) *T {
@@ -50,4 +51,8 @@ func (f T) IsBroadcast() bool {
 
 func (f T) IsHandshake() bool {
 	return f.Has(Handshake)
+}
+
+func (f T) IsExcludeSender() bool {
+	return f.Has(ExcludeSender)
 }

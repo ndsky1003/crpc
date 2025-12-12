@@ -9,10 +9,11 @@ import (
 )
 
 type broadcastResult struct {
-	rawBody   []byte       // 原始数据
-	resCoderT coder.T      // 编码类型
-	code      headercode.T // 是否成功
-	IsEOS     bool         // 是否是结束标志
+	rawBody     []byte       // 原始数据
+	decodedBody any          // 已经解码的对象（来自本地优化）
+	resCoderT   coder.T      // 编码类型
+	code        headercode.T // 是否成功
+	IsEOS       bool         // 是否是结束标志
 }
 
 type Call struct {

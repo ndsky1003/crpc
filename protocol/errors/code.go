@@ -2,6 +2,8 @@ package errors
 
 type T = uint16
 
+const None T = 0 //是一个假错误,不是真的错误,既没有返回值,也没有错误,需要,就是作为特殊功能的返回.eg:重置客户端的EOS
+
 // client
 const (
 	ClientInternal         T = 400 //参数错误

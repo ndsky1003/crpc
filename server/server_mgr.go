@@ -160,12 +160,33 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 	}
 	// 2. 处理广播请求
 	if h.Flags.IsBroadcast() {
-		targets := group.GetAll()
+		allTargets := group.GetAll()
 		sid := sess.ID()
 		seq := h.Seq
-		if len(targets) == 0 {
+		var realTargets []*Session
+		excludeSelf := h.Flags.IsExcludeSender()
+
+		if len(allTargets) > 0 {
+			// 预分配切片以提高性能，最大长度为 allTargets
+			realTargets = make([]*Session, 0, len(allTargets))
+			for _, t := range allTargets {
+				if excludeSelf && t.ID() == sid {
+					continue
+				}
+				realTargets = append(realTargets, t)
+			}
+		}
+
+		if len(realTargets) == 0 {
 			if h.Type == headertype.Req { //send 不需要回
 				h.Flags.With(headerflags.EOS)
+			}
+			// 如果是因为排除自己导致没有目标，应该返回 OK 而不是 Error，否则客户端会收到报错
+			// 如果本来就没服务，才报 Unavailable
+			if len(allTargets) > 0 && excludeSelf {
+				// 这是一个特殊的成功：没有其他接收者，但本地已经处理了（Client端知道）
+				// 或者我们回一个空的 EOS
+				return errors.New(errors.None, "无可广播的对象")
 			}
 			return errors.New(errors.ServerServiceUnavailable, "无可广播的对象")
 		}
@@ -176,10 +197,10 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 			}
 			return err
 		}
-		count := int32(len(targets))
+		count := int32(len(realTargets))
 		s.broadcastCounter.setBroadcastCount(sid, seq, count, timeout)
 
-		for _, t := range targets {
+		for _, t := range realTargets {
 			target := t
 			copy_h := *h
 			handleFailure := func(err error) {
@@ -230,7 +251,6 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, meta, body []
 		return fmt.Errorf("target session %s not found for response", tosid)
 	}
 	targetSess := target.(server.Session)
-	// [新增] 广播响应的拦截处理
 	if h.Flags.IsBroadcast() {
 		if remain := s.broadcastCounter.decreaseBroadcastCount(tosid, h.Seq); remain <= 0 {
 			h.Flags.Add(headerflags.EOS)

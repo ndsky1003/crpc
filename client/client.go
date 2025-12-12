@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -415,11 +416,6 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 		go c.processBroadcastLoop(subCtx, call)
 	}
 
-	isLocalCall := (c.Name == service) && (ht == headertype.Req)
-	metaT := *opt.MetaCoderT
-	reqT := *opt.ReqCoderT
-	resT := *opt.ResCoderT
-
 	if *opt.Debug {
 		h.Flags.With(headerflags.Debug)
 	}
@@ -444,37 +440,104 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 		}
 	}
 
+	call.seq = seq
+	call.Reply = reply
+
+	metaT := *opt.MetaCoderT
+	reqT := *opt.ReqCoderT
+	resT := *opt.ResCoderT
+
+	// 检查本地是否有该服务
+	_, hasLocalModule := c.serviceMap.Load(module)
+
+	isUnicastLocal := (c.Name == service) && hasLocalModule && (ht == headertype.Req) && !h.Flags.IsBroadcast()
+
+	// 闭包：执行本地逻辑
+	runLocal := func() {
+		// 调用本地服务
+		// 注意：invoke_local_func 内部还是使用了反射调用生成的 HandleMsg，
+		// 如果追求极致性能，HandleMsg 应该接受 any 类型的 args，目前架构下为了兼容仍传 bytes。
+		// 但返回值 res 是 interface{}，不需要反序列化。
+		res, err := c.invoke_local_func(ctx, module, method, metaT, reqT, metaBytes, bodyBytes)
+
+		if h.Flags.IsBroadcast() {
+			// 广播模式：构造结果推入 channel
+			resObj := &broadcastResult{
+				// rawBody: nil, // 本地调用不需要 rawBody
+				decodedBody: res, // 直接存结果对象 [优化点]
+				resCoderT:   resT,
+				code:        headercode.OK,
+				IsEOS:       false, // 本地肯定不是 EOS，EOS 由 Server 发
+			}
+			if err != nil {
+				resObj.code = headercode.Failed
+				// 如果出错，这里简单处理，将错误包装。
+				// 为了兼容 broadcastResult 结构，这里可能需要序列化错误，
+				// 或者在 processBroadcastLoop 里处理 decodedBody 为 error 的情况。
+				// 现阶段简单做法：序列化 Error 放入 rawBody，模拟远程错误回包
+				var rpcErr *errors.Error
+				if e, ok := err.(*errors.Error); ok {
+					rpcErr = e
+				} else {
+					rpcErr = errors.New(errors.RemoteInternal, err.Error())
+				}
+				if b, e := coder.Marshal(coder.Msgp, rpcErr); e == nil {
+					resObj.rawBody = b
+				}
+				resObj.decodedBody = nil // 出错了就不传对象了
+			}
+
+			select {
+			case call.broadcastCh <- resObj:
+			case <-call.subCtx.Done():
+			}
+		} else {
+			// 单播模式：直接填充 Reply [优化点]
+			if err != nil {
+				call.Error = err
+			} else if call.Reply != nil && res != nil {
+				// 利用反射直接赋值，跳过 Unmarshal
+				// 假设 call.Reply 是指针，res 是值或指针
+				destVal := reflect.ValueOf(call.Reply)
+				if destVal.Kind() == reflect.Ptr && !destVal.IsNil() {
+					srcVal := reflect.ValueOf(res)
+					// 处理指针解引用
+					if srcVal.Kind() == reflect.Ptr {
+						srcVal = srcVal.Elem()
+					}
+					// 确保目标也是解引用后的值
+					destElem := destVal.Elem()
+					if destElem.CanSet() {
+						destElem.Set(srcVal)
+					} else {
+						call.Error = errors.New(errors.ClientInternal, "cannot set reply value")
+					}
+				}
+			}
+			call.done()
+		}
+	}
+
+	// 场景 1: 纯本地单播 -> 只跑本地，不发包
+	if isUnicastLocal {
+		h.Release() // 不需要发包了，释放头
+		go runLocal()
+		return call
+	}
+
+	// 场景 2: 广播且本地也有 -> 跑本地 + 发包(排除自己)
+	if h.Flags.IsBroadcast() && hasLocalModule {
+		h.Flags.Add(headerflags.ExcludeSender) // [关键] 标记告诉 Server 不要发给我
+		go runLocal()
+		// 继续往下走，发送网络包给其他人
+	}
+
 	packet, err := protocol.Pack(h, metaBytes, bodyBytes)
 	h.Release()
 	if err != nil {
 		call.Error = errors.New(errors.ClientInternal, err.Error())
 		call.done()
 		return
-	}
-
-	call.seq = seq
-	call.Reply = reply
-
-	if isLocalCall {
-
-		go func() {
-			res, err := c.invoke_local_func(ctx, module, method, metaT, reqT, metaBytes, bodyBytes)
-			if err != nil {
-				call.Error = err
-			} else if call.Reply != nil {
-				data, err := coder.Marshal(resT, res)
-				if err != nil {
-					call.Error = errors.New(errors.ClientInternal, err.Error())
-				} else {
-					if err := coder.Unmarshal(resT, data, call.Reply); err != nil {
-						call.Error = errors.New(errors.ClientInternal, err.Error())
-					}
-				}
-			}
-			call.done()
-		}()
-
-		return call
 	}
 
 	if err := c.client.Sends(ctx, packet, &opt.Option); err != nil {
@@ -508,23 +571,29 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 				return
 			}
 			if call.BroadcastResNewFunc == nil || call.BroadcastResCallBack == nil {
-				// 安全保护，理论上不应该发生
 				return
 			}
 			var reply any
 			var resErr error
-			if res.code.IsOK() {
+			if res.decodedBody != nil {
+				reply = res.decodedBody
+			} else if res.code.IsOK() {
 				reply = call.BroadcastResNewFunc()
 				if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
 					call.BroadcastResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
 					return
 				}
 			} else {
-				resErr = &errors.Error{}
-				if err := coder.Unmarshal(coder.Msgp, res.rawBody, resErr); err != nil {
+				tmpErr := &errors.Error{}
+				if err := coder.Unmarshal(coder.Msgp, res.rawBody, tmpErr); err != nil {
 					// 无法解析错误信息，构造一个通用错误
 					call.BroadcastResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
 					return
+				}
+				if tmpErr.Code == errors.None {
+					resErr = nil
+				} else {
+					resErr = tmpErr
 				}
 			}
 
