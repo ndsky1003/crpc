@@ -151,7 +151,7 @@ func (sg *ServiceGroup) SelectByKey(key string) *Session {
 	targetHash := sg.keys[idx]
 	targetSid := sg.hashMap[targetHash]
 
-	// [优化] 直接从 Map 获取，O(1)
+	// 直接从 Map 获取，O(1)
 	return sg.sessionMap[targetSid]
 }
 
@@ -179,7 +179,7 @@ func (sg *ServiceGroup) GetBySid(sid string) *Session {
 	sg.RLock()
 	defer sg.RUnlock()
 
-	// [优化] 直接从 Map 获取，O(1)
+	// 直接从 Map 获取，O(1)
 	return sg.sessionMap[sid]
 }
 

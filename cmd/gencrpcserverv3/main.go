@@ -118,7 +118,7 @@ func main() {
 	packageName := node.Name.Name
 	structMap := make(map[string][]MethodInfo)
 
-	// [新增] 收集文件中的所有 import
+	// 收集文件中的所有 import
 	allImports := make(map[string]*ImportInfo)
 	ast.Inspect(node, func(n ast.Node) bool {
 		if imp, ok := n.(*ast.ImportSpec); ok {
@@ -128,7 +128,7 @@ func main() {
 		return true
 	})
 
-	// [新增] 收集代码生成需要的 import
+	// 收集代码生成需要的 import
 	neededImports := make(map[string]*ImportInfo)
 	// 基础依赖
 	neededImports["context"] = &ImportInfo{Path: "\"context\"", Alias: "context"}
@@ -167,7 +167,7 @@ func main() {
 		if isValid {
 			structMap[recvType] = append(structMap[recvType], info)
 
-			// [新增] 收集依赖的包 (Req, Meta, Res)
+			// 收集依赖的包 (Req, Meta, Res)
 			collectImports(info.ReqType, allImports, neededImports)
 			collectImports(info.MetaType, allImports, neededImports)
 			collectImports(info.ResType, allImports, neededImports)
@@ -205,7 +205,7 @@ func main() {
 		log.Fatalf("Write file error: %v", err)
 	}
 
-	// [新增] 使用 goimports 格式化
+	// 使用 goimports 格式化
 	_ = exec.Command("goimports", "-w", out_file_path).Run()
 }
 

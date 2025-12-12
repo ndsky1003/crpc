@@ -464,7 +464,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 			// 广播模式：构造结果推入 channel
 			resObj := &broadcastResult{
 				// rawBody: nil, // 本地调用不需要 rawBody
-				decodedBody: res, // 直接存结果对象 [优化点]
+				decodedBody: res, // 直接存结果对象,注意这里可能是任意值,指针或者值,指针的辅佐用
 				resCoderT:   resT,
 				code:        headercode.OK,
 				IsEOS:       false, // 本地肯定不是 EOS，EOS 由 Server 发
@@ -492,7 +492,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 			case <-call.subCtx.Done():
 			}
 		} else {
-			// 单播模式：直接填充 Reply [优化点]
+			// 单播模式：直接填充 Reply
 			if err != nil {
 				call.Error = err
 			} else if call.Reply != nil && res != nil {
@@ -551,7 +551,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 	return call
 }
 
-// [新增] 广播消费循环
+// 广播消费循环
 func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 	// 保证退出时清理 pending (虽然 handleRes 也会清理，但双重保险)
 	// 同时也防止用户回调返回 false 后，pending map 中还有残留

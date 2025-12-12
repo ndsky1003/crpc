@@ -31,7 +31,7 @@ type Header struct {
 	Method     string        //10 同上
 	TraceID    string        //10 同上 链路追踪的key
 	HashKey    string        //10 同上 远程调用一致性hash
-	// [新增] 截止时间 (Unix Micro)
+	// 截止时间 (Unix Micro)
 	// 0 表示无限制
 	// 	v := now.UnixMicro()
 	// t := time.UnixMicro(v)

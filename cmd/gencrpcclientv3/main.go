@@ -171,7 +171,7 @@ func main() {
 type ImportInfo struct {
 	Alias      string
 	Path       string
-	PrintAlias bool // [新增] 控制是否打印别名
+	PrintAlias bool // 控制是否打印别名
 }
 
 // MethodInfo 存储方法的元数据
