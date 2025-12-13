@@ -11,6 +11,7 @@ import (
 
 type Server struct {
 	*server.Server
+	mgr *server_mgr
 }
 
 func New(ctx context.Context, opts ...*Option) *Server {
@@ -31,8 +32,13 @@ func New(ctx context.Context, opts ...*Option) *Server {
 		broadcastCounter: NewBroadcastCounterAll(*opt.BroadcastCounterExpiration),
 		workPool:         workPool,
 	}
+	s.mgr = mgr
 	s.Server = server.New(ctx, mgr, &opt.Option)
 	return s
+}
+
+func (s *Server) Use(middleware ...HandlerFunc) {
+	s.mgr.Use(middleware...)
 }
 
 func (s *Server) Close() error {

@@ -34,6 +34,7 @@ type Client struct {
 	seq        uint64
 	pending    sync.Map // seq -> *Call
 	serviceMap sync.Map // map[string]*service (本地服务注册)
+	handlers   HandlersChain
 }
 
 func Dial(ctx context.Context, name string, addr string, opts ...*Option) (c *Client, err error) {
@@ -631,4 +632,8 @@ func (c *Client) parseModuleFunc(raw string) (module, function string, err error
 	module = raw[:idx]
 	function = raw[idx+1:]
 	return module, function, nil
+}
+
+func (c *Client) Use(middleware ...HandlerFunc) {
+	c.handlers = append(c.handlers, middleware...)
 }

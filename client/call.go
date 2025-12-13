@@ -21,6 +21,9 @@ type Call struct {
 	Reply any
 	Error error
 
+	// middleware 上下文
+	ctx *Context
+
 	//broadcast 相关字段 start
 	BroadcastResNewFunc  func() any                              // 用于广播调用时创建返回值对象
 	BroadcastResCallBack func(ret any, err error, eos bool) bool // 返回true表示继续广播,返回false表示停止广播
@@ -48,6 +51,13 @@ func (this *Call) done() {
 	if this.subCancel != nil {
 		this.subCancel()
 	}
+
+	if this.ctx != nil {
+		this.ctx.invokeHooks(this.Error)
+		this.ctx.releaseContext()
+		this.ctx = nil
+	}
+
 	select {
 	case this.Done <- this:
 	default:

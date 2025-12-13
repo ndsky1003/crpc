@@ -31,6 +31,12 @@ type server_mgr struct {
 	workPool         *ants.Pool
 
 	sidGroupIndex sync.Map
+
+	handlers HandlersChain
+}
+
+func (s *server_mgr) Use(middleware ...HandlerFunc) {
+	s.handlers = append(s.handlers, middleware...)
 }
 
 func (s *server_mgr) Close() error {
@@ -39,6 +45,8 @@ func (s *server_mgr) Close() error {
 			s.broadcastCounter.Stop()
 			s.broadcastCounter = nil
 		}
+		s.sidGroupIndex.Clear()
+		s.handlers = s.handlers[:0]
 		if s.workPool != nil {
 			s.workPool.Release()
 		}
@@ -114,9 +122,39 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		defer h.Release()
 		defer copy_meta.Release()
 		defer copy_body.Release()
-		if err := s.route(sess, h, copy_meta.Bytes()[:meta_l], copy_body.Bytes()[:body_l]); err != nil {
-			logger.Errorf("route error: %v", err)
+		// 1. 获取 Context
+		ctx := obtainContext()
+
+		// 2. 初始化
+		ctx.Sess = sess
+		ctx.Header = h
+		ctx.MetaBytes = copy_meta.Bytes()[:meta_l]
+		ctx.BodyBytes = copy_body.Bytes()[:body_l]
+
+		// 3. 构造最后一环 Handler
+		finalHandler := func(c *Context) {
+			// 调用原有的 route 逻辑
+			c.Err = s.route(c.Sess, c.Header, c.MetaBytes, c.BodyBytes)
 		}
+
+		// 4. 组装链 (Prepend existing handlers)
+		if len(s.handlers) > 0 {
+			ctx.handlers = append(s.handlers, finalHandler)
+		} else {
+			ctx.handlers = HandlersChain{finalHandler}
+		}
+
+		// 5. 执行
+		ctx.Next()
+
+		// 6. 错误日志 (可选)
+		if ctx.Err != nil {
+			// 路由内部其实已经处理了 replyError，这里的 Err 更多是给中间件感知
+			logger.Errorf("request process error: %v", ctx.Err)
+		}
+
+		// 7. 释放 Context
+		ctx.releaseContext()
 	}
 	if err = s.workPool.Submit(task); err != nil {
 		h.Release()
