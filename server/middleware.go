@@ -70,9 +70,12 @@ func (c *Context) reset() {
 	c.MetaBytes = nil
 	c.BodyBytes = nil
 	c.Err = nil
-	c.handlers = nil
 	c.index = -1
 	c.Keys = nil
+	for i := range c.handlers {
+		c.handlers[i] = nil
+	}
+	c.handlers = c.handlers[:0]
 }
 
 // releaseContext 释放 Context

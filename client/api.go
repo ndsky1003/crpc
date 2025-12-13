@@ -36,14 +36,12 @@ func (c *Client) executeChain(ctx context.Context, callType headertype.T, servic
 	mCtx.Reply = reply
 	mCtx.Opts = opts
 
-	// 3. 构造完整的处理链
+	mCtx.handlers = mCtx.handlers[:0]
 	if len(c.handlers) > 0 {
-		mCtx.handlers = append(c.handlers, c.finalMiddleware(callType))
-	} else {
-		mCtx.handlers = HandlersChain{c.finalMiddleware(callType)}
+		mCtx.handlers = append(mCtx.handlers, c.handlers...)
 	}
+	mCtx.handlers = append(mCtx.handlers, c.finalMiddleware(callType))
 
-	// 4. 开始执行 (洋葱模型入口)
 	mCtx.Next()
 
 	// 如果被 Abort 了，finalMiddleware 没执行，Call 是 nil

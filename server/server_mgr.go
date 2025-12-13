@@ -149,8 +149,14 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 
 		// 6. 错误日志 (可选)
 		if ctx.Err != nil {
-			// 路由内部其实已经处理了 replyError，这里的 Err 更多是给中间件感知
-			logger.Errorf("request process error: %v", ctx.Err)
+			if h.Type == headertype.Req {
+				if ctx.IsAborted() {
+					s.replyError(sess, h, errors.New(errors.ServerStandardError, "request aborted by middleware"))
+				} else {
+					s.replyError(sess, h, ctx.Err)
+				}
+			}
+			logger.Warnf("request process error: %v", ctx.Err)
 		}
 
 		// 7. 释放 Context
@@ -170,11 +176,7 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 
 func (s *server_mgr) route(sess server.Session, h *header.Header, meta, body []byte) error {
 	if h.Type.IsReq() {
-		err := s.handleReq(sess, h, meta, body)
-		if err != nil {
-			s.replyError(sess, h, err)
-		}
-		return err
+		return s.handleReq(sess, h, meta, body)
 	} else {
 		return s.handleRes(sess, h, meta, body)
 	}

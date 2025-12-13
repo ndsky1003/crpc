@@ -82,8 +82,15 @@ func (c *Context) reset() {
 	c.Err = nil
 	c.handlers = nil
 	c.index = -1
-	// 复用切片底层数组，避免分配
+	for i := range c.hooks {
+		c.hooks[i] = nil
+	}
 	c.hooks = c.hooks[:0]
+	for i := range c.handlers {
+		c.handlers[i] = nil
+	}
+	c.handlers = c.handlers[:0]
+
 }
 
 // releaseContext 释放自身回池
@@ -95,8 +102,9 @@ func (c *Context) releaseContext() {
 var contextPool = sync.Pool{
 	New: func() any {
 		return &Context{
-			index: -1,
-			hooks: make([]func(error), 0, 4), // 预分配一点空间
+			index:    -1,
+			hooks:    make([]func(error), 0, 4), // 预分配一点空间
+			handlers: make(HandlersChain, 0, 4), // 预分配 handlers 避免扩容
 		}
 	},
 }

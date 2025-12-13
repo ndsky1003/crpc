@@ -289,6 +289,8 @@ func (c *Client) sendReply(h *header.Header, res any, err error) error {
 	switch req_type {
 	case headertype.Req:
 		res_type = headertype.Res
+	case headertype.Send: // 显式处理
+		return nil
 	default:
 		return errors.New(errors.ClientInternal, "unknown request type")
 	}
