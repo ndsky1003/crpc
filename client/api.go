@@ -87,8 +87,10 @@ func (c *Client) Call(ctx context.Context, serviceName, method string, args, rep
 	select {
 	case <-ctx.Done():
 		call.Error = errors.New(errors.ClientInternal, ctx.Err().Error())
-		c.pending.Delete(call.seq)
-		call.done()
+		if _, loaded := c.pending.LoadAndDelete(call.seq); loaded {
+			call.Error = errors.New(errors.ClientInternal, ctx.Err().Error())
+			call.done()
+		}
 		return ctx.Err()
 	case call := <-call.Done:
 		return call.Error
