@@ -44,7 +44,6 @@ func (c *Client) Send(ctx context.Context, service, method string, args any, opt
 
 func (c *Client) Close() error {
 	err := c.client.Close()
-	c.pending.Clear()
 	c.serviceMap.Clear()
 	for i := range c.handlers {
 		c.handlers[i] = nil
