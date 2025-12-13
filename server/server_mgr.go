@@ -148,15 +148,22 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		ctx.Next()
 
 		// 6. 错误日志 (可选)
-		if ctx.Err != nil {
-			if h.Type == headertype.Req {
-				if ctx.IsAborted() {
-					s.replyError(sess, h, errors.New(errors.ServerStandardError, "request aborted by middleware"))
-				} else {
-					s.replyError(sess, h, ctx.Err)
-				}
+		if h.Type == headertype.Req {
+			if ctx.Err != nil {
+				// 优先返回具体的错误信息 (token invalid, rate limit 等)
+				// 不管是否 Abort，只要有 Err，就以 Err 为主
+				logger.Warnf("request process error: %v", ctx.Err)
+				s.replyError(sess, h, ctx.Err)
+			} else if ctx.IsAborted() {
+				// 处理 "Abort 但无 Err" 的死角
+				// 必须回包，防止客户端超时
+				s.replyError(sess, h, errors.New(errors.ServerStandardError, "request aborted by middleware"))
 			}
-			logger.Warnf("request process error: %v", ctx.Err)
+		} else {
+			// Send 类型 (OneWay)：仅记录日志，不回包
+			if ctx.Err != nil {
+				logger.Warnf("async send request process error: %v", ctx.Err)
+			}
 		}
 
 		// 7. 释放 Context
@@ -403,7 +410,13 @@ func (s *server_mgr) replyError(srcSess server.Session, h *header.Header, rpcErr
 	}
 	h.Code = headercode.Failed
 	h.ResCoderT = coder.Msgp // 错误信息默认用 Msgp
-	body, err := coder.Marshal(h.ResCoderT, rpcErr)
+	var finalErr *errors.Error
+	if e, ok := rpcErr.(*errors.Error); ok {
+		finalErr = e
+	} else {
+		finalErr = errors.New(errors.ServerInternal, rpcErr.Error())
+	}
+	body, err := coder.Marshal(h.ResCoderT, finalErr)
 	if err != nil {
 		return err
 	}
