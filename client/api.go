@@ -63,6 +63,16 @@ func (c *Client) executeChain(ctx context.Context, callType headertype.T, servic
 
 		return dummyCall
 	}
+
+	// 情况 B: _go 内部报错 (Critical Fix)
+	// Call 对象存在，但已有 Error，说明 _go 内部已经调用过 done() 了。
+	// 此时 mCtx 还没来得及被 done() 释放，必须在这里手动释放！
+	if mCtx.Call.Error != nil {
+		mCtx.invokeHooks(mCtx.Call.Error) // 触发 hooks (如监控耗时)
+		mCtx.releaseContext()             // 归还 Context 到池子
+		mCtx.Call.ctx = nil               // 断开引用，防止野指针
+		return mCtx.Call
+	}
 	// 5. 返回 Call 对象
 	// 注意：Context 的释放权现在移交给了 Call (在 call.done() 中释放)
 	return mCtx.Call
@@ -78,6 +88,7 @@ func (c *Client) Call(ctx context.Context, serviceName, method string, args, rep
 	case <-ctx.Done():
 		call.Error = errors.New(errors.ClientInternal, ctx.Err().Error())
 		c.pending.Delete(call.seq)
+		call.done()
 		return ctx.Err()
 	case call := <-call.Done:
 		return call.Error

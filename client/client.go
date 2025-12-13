@@ -275,6 +275,7 @@ func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) err
 			if err := coder.Unmarshal(coder.Msgp, body, &resErr); err != nil {
 				call.Error = errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
 			} else {
+				resErr.WithTraceID(h.TraceID)
 				call.Error = &resErr
 			}
 		}
