@@ -9,11 +9,11 @@ import (
 )
 
 type broadcastResult struct {
-	rawBody     []byte       // 原始数据
-	decodedBody any          // 已经解码的对象（来自本地优化）
-	resCoderT   coder.T      // 编码类型
-	code        headercode.T // 是否成功
-	IsEOS       bool         // 是否是结束标志
+	rawBody   []byte       // 原始数据
+	res       any          // 已经解码的对象（来自本地优化）
+	resCoderT coder.T      // 编码类型
+	code      headercode.T // 是否成功
+	IsEOS     bool         // 是否是结束标志
 }
 
 type Call struct {
@@ -53,7 +53,7 @@ func (this *Call) done() {
 	}
 
 	if this.ctx != nil {
-		this.ctx.invokeHooks(this.Error)
+		this.ctx.invokeHooks(this.Reply, this.Error)
 		this.ctx.releaseContext()
 		this.ctx = nil
 	}

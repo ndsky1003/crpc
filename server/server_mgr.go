@@ -134,7 +134,8 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		// 3. 构造最后一环 Handler
 		finalHandler := func(c *Context) {
 			// 调用原有的 route 逻辑
-			c.Err = s.route(c.Sess, c.Header, c.MetaBytes, c.BodyBytes)
+			err := s.route(c.Sess, c.Header, c.MetaBytes, c.BodyBytes)
+			c.SetError(err)
 		}
 
 		// 4. 组装链 (Prepend existing handlers)
@@ -149,11 +150,11 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 
 		// 6. 错误日志 (可选)
 		if h.Type == headertype.Req {
-			if ctx.Err != nil {
+			if err := ctx.Err(); err != nil {
 				// 优先返回具体的错误信息 (token invalid, rate limit 等)
 				// 不管是否 Abort，只要有 Err，就以 Err 为主
-				logger.Warnf("request process error: %v", ctx.Err)
-				s.replyError(sess, h, ctx.Err)
+				logger.Warnf("request process error: %v", err)
+				s.replyError(sess, h, err)
 			} else if ctx.IsAborted() {
 				// 处理 "Abort 但无 Err" 的死角
 				// 必须回包，防止客户端超时

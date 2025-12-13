@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"reflect"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -77,7 +76,7 @@ func New(ctx context.Context, name string, addr string, opts ...*Option) (c *Cli
 		SetOnDisconnected(c.onDisconnected).
 		SetOnConnected(c.onConnected))
 	if err != nil {
-		return nil, err
+		return nil, errors.New(errors.ClientInternal, err.Error())
 	}
 	c.client = nc
 	return c, nil
@@ -351,7 +350,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 		call.done()
 		return
 	}
-	module, method, err := c.parseModuleFunc(method)
+	module, method, err := ut.ParseModuleFunc(method)
 	if err != nil {
 		call.Error = errors.New(errors.ClientInternal, err.Error())
 		call.done()
@@ -418,7 +417,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 
 		// 2. 启动独立的消费协程
 		// 将 ctx 传入，以便在请求超时/取消时退出循环
-		go c.processBroadcastLoop(subCtx, call)
+		// go c.processBroadcastLoop(subCtx, call)
 	}
 
 	if *opt.Debug {
@@ -479,10 +478,10 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 			// 广播模式：构造结果推入 channel
 			resObj := &broadcastResult{
 				// rawBody: nil, // 本地调用不需要 rawBody
-				decodedBody: res, // 直接存结果对象,注意这里可能是任意值,指针或者值,指针的辅佐用
-				resCoderT:   resT,
-				code:        headercode.OK,
-				IsEOS:       false, // 本地肯定不是 EOS，EOS 由 Server 发
+				res:       res, // 直接存结果对象,注意这里可能是任意值,指针或者值,指针的辅佐用
+				resCoderT: resT,
+				code:      headercode.OK,
+				IsEOS:     false, // 本地肯定不是 EOS，EOS 由 Server 发
 			}
 			if err != nil {
 				resObj.code = headercode.Failed
@@ -499,7 +498,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 				if b, e := coder.Marshal(coder.Msgp, rpcErr); e == nil {
 					resObj.rawBody = b
 				}
-				resObj.decodedBody = nil // 出错了就不传对象了
+				resObj.res = nil // 出错了就不传对象了
 			}
 
 			select {
@@ -567,6 +566,52 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 }
 
 // 广播消费循环
+func (c *Client) dispatchBroadcast(call *Call, res *broadcastResult) bool {
+	if call.BroadcastResNewFunc == nil || call.BroadcastResCallBack == nil {
+		return false
+	}
+
+	var reply any
+	var resErr error
+	if res.res != nil { // 本地调用优化，直接有对象
+		reply = res.res
+	} else if res.code.IsOK() {
+		reply = call.BroadcastResNewFunc()
+		if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
+			tmpErr := errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
+			if call.ctx != nil {
+				call.ctx.invokeHooks(nil, tmpErr)
+			}
+			call.BroadcastResCallBack(nil, tmpErr, res.IsEOS)
+			return false
+		}
+	} else {
+		tmpErr := &errors.Error{}
+		if err := coder.Unmarshal(coder.Msgp, res.rawBody, tmpErr); err != nil {
+			tmpErr := errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
+			if call.ctx != nil {
+				call.ctx.invokeHooks(nil, tmpErr)
+			}
+			call.BroadcastResCallBack(nil, tmpErr, res.IsEOS)
+			return false
+		}
+		if tmpErr.Code != errors.None {
+			resErr = tmpErr
+		}
+	}
+
+	if call.ctx != nil {
+		call.ctx.invokeHooks(reply, resErr)
+	}
+	// 执行用户回调
+	cont := call.BroadcastResCallBack(reply, resErr, res.IsEOS)
+	// 如果是 EOS，框架层强制停止，不管用户返回什么
+	if res.IsEOS {
+		return false
+	}
+	return cont
+}
+
 func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 	// 保证退出时清理 pending (虽然 handleRes 也会清理，但双重保险)
 	// 同时也防止用户回调返回 false 后，pending map 中还有残留
@@ -578,65 +623,109 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 	for {
 		select {
 		case <-ctx.Done():
-			// 上下文取消/超时，停止处理
-			return
+			// 上下文取消时，尝试排空 channel
+			// 防止因为 handleRes 设置了 EOS 并调用了 done，导致 select 随机选中此分支而丢失 EOS
+			for {
+				select {
+				case res, ok := <-call.broadcastCh:
+					if !ok {
+						return
+					}
+					// 处理残留消息,也就是最后一条消息无法确定select选中上面，还是下面
+					if !c.dispatchBroadcast(call, res) {
+						return
+					}
+				default:
+					return
+				}
+			}
 		case res, ok := <-call.broadcastCh:
 			if !ok {
-				// Channel 被 handleRes 关闭 (EOS)，说明流结束
 				return
 			}
-			if call.BroadcastResNewFunc == nil || call.BroadcastResCallBack == nil {
-				return
-			}
-			var reply any
-			var resErr error
-			if res.decodedBody != nil {
-				reply = res.decodedBody
-			} else if res.code.IsOK() {
-				reply = call.BroadcastResNewFunc()
-				if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
-					call.BroadcastResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
-					return
-				}
-			} else {
-				tmpErr := &errors.Error{}
-				if err := coder.Unmarshal(coder.Msgp, res.rawBody, tmpErr); err != nil {
-					// 无法解析错误信息，构造一个通用错误
-					call.BroadcastResCallBack(nil, errors.New(errors.ClientInternal, "unmarshal error: "+err.Error()), res.IsEOS)
-					return
-				}
-				if tmpErr.Code == errors.None {
-					resErr = nil
-				} else {
-					resErr = tmpErr
-				}
-			}
-
-			cont := call.BroadcastResCallBack(reply, resErr, res.IsEOS)
-			if !cont {
-				// 用户决定停止接收
+			if !c.dispatchBroadcast(call, res) {
 				return
 			}
 		}
 	}
 }
 
-func (c *Client) parseModuleFunc(raw string) (module, function string, err error) {
-	if raw == "" {
-		// 建议错误信息更明确
-		return "", "", fmt.Errorf("%w: input is empty", errors.ModuleFuncError)
-	}
-
-	// before, after, found := strings.Cut(raw, ".")
-	idx := strings.LastIndex(raw, ".")
-	if idx == -1 {
-		return "", "", fmt.Errorf("%w: missing dot separator in '%s'", errors.ModuleFuncError, raw)
-	}
-	module = raw[:idx]
-	function = raw[idx+1:]
-	return module, function, nil
-}
-
 func (c *Client) Use(middleware ...HandlerFunc) {
 	c.handlers = append(c.handlers, middleware...)
+}
+
+// finalMiddleware 构造最后一环：调用底层的 _go 进行网络发送
+func (c *Client) finalMiddleware(callType headertype.T) HandlerFunc {
+	return func(ctx *Context) {
+		// 使用 ctx.Ctx (可能被中间件修改过)
+		call := c._go(ctx.Ctx, callType, ctx.Service, ctx.Method, ctx.Args, ctx.Reply, ctx.Opts...)
+
+		// 双向绑定：让 Context 和 Call 互相引用
+		// 1. Context 持有 Call，以便中间件后续可以访问 Call 的信息
+		ctx.Call = call
+
+		// 2. Call 持有 Context，以便 Call 结束时触发回调并释放 Context
+		call.ctx = ctx
+		// : 确保绑定完成后，再启动广播处理循环
+		// 这样 processBroadcastLoop 内部就能安全使用 call.ctx 了
+		if call.broadcastCh != nil {
+			go c.processBroadcastLoop(call.subCtx, call)
+		}
+	}
+}
+
+// executeChain 统一执行流
+func (c *Client) executeChain(ctx context.Context, callType headertype.T, serviceName, method string, args, reply any, opts ...*Option) *Call {
+	// 1. 从 Pool 获取 Context
+	mCtx := obtainContext()
+
+	// 2. 初始化
+	mCtx.Ctx = ctx
+	mCtx.Service = serviceName
+	mCtx.Method = method
+	mCtx.Args = args
+	mCtx.Reply = reply
+	mCtx.Opts = opts
+
+	mCtx.handlers = mCtx.handlers[:0]
+	if len(c.handlers) > 0 {
+		mCtx.handlers = append(mCtx.handlers, c.handlers...)
+	}
+	mCtx.handlers = append(mCtx.handlers, c.finalMiddleware(callType))
+
+	mCtx.Next()
+
+	// 如果被 Abort 了，finalMiddleware 没执行，Call 是 nil
+	if mCtx.Call == nil {
+		// 创建一个"伪造"的 Call 对象，用于承载错误信息
+		// 这样调用方拿到 Call 后，访问 Call.Error 能看到拦截原因
+		dummyCall := NewCall()
+		if err := mCtx.Err(); err != nil {
+			if _, ok := err.(*errors.Error); ok {
+				dummyCall.Error = err
+			} else {
+				dummyCall.Error = errors.New(errors.ClientInternal, err.Error())
+			}
+		} else {
+			// 如果用户 Abort 了但没设置 Err，给一个默认错误
+			dummyCall.Error = errors.New(errors.ClientCanceled, "request aborted by middleware")
+		}
+		dummyCall.ctx = mCtx
+		mCtx.Call = dummyCall
+		dummyCall.done() // 立即结束
+		return dummyCall
+	}
+
+	// 情况 B: _go 内部报错 (Critical Fix)
+	// Call 对象存在，但已有 Error，说明 _go 内部已经调用过 done() 了。
+	// 此时 mCtx 还没来得及被 done() 释放，必须在这里手动释放！
+	if mCtx.Call.Error != nil {
+		mCtx.invokeHooks(nil, mCtx.Call.Error) // 触发 hooks (如监控耗时)
+		mCtx.releaseContext()                  // 归还 Context 到池子
+		mCtx.Call.ctx = nil                    // 断开引用，防止野指针
+		return mCtx.Call
+	}
+	// 5. 返回 Call 对象
+	// 注意：Context 的释放权现在移交给了 Call (在 call.done() 中释放)
+	return mCtx.Call
 }

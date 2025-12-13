@@ -6,10 +6,27 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ndsky1003/crpc/v3/protocol"
 )
+
+func ParseModuleFunc(raw string) (module, function string, err error) {
+	if raw == "" {
+		// 建议错误信息更明确
+		return "", "", fmt.Errorf("input is empty")
+	}
+
+	// before, after, found := strings.Cut(raw, ".")
+	idx := strings.LastIndex(raw, ".")
+	if idx == -1 {
+		return "", "", fmt.Errorf("missing dot separator in '%s'", raw)
+	}
+	module = raw[:idx]
+	function = raw[idx+1:]
+	return module, function, nil
+}
 
 func ResolveOption[T any](old **T, new *T) {
 	if new != nil {

@@ -27,8 +27,8 @@ type JwtClaims struct {
 // FileTransfer 用于文件传输的结构体
 // 建议配合 coder.Msgp 使用以获得最佳性能
 type FileTransfer struct {
-	FileName string `msg:"n"` // 文件名 (相对路径)
-	Data     []byte `msg:"d"` // 文件块数据
-	Offset   int64  `msg:"o"` // 当前块在文件中的偏移量
-	IsFinish bool   `msg:"f"` // 是否是最后一块
+	FileName string `msg:"n"`          // 文件名 (相对路径)
+	Data     []byte `msg:"d,allownil"` // 文件块数据
+	Offset   int64  `msg:"o"`          // 当前块在文件中的偏移量
+	IsFinish bool   `msg:"f"`          // 是否是最后一块
 }

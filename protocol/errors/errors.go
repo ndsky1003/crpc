@@ -5,8 +5,7 @@ import (
 	"fmt"
 )
 
-var ModuleFuncError = New(ClientInternal, "invalid module/function format")
-
+// 所有错误，由这个接口包装，以便以msgp序列化，然后传递
 type Error struct {
 	Code    uint16 `msg:"c"`          // 错误码 (用于程序逻辑判断，如 1001=UserNotFound)
 	Msg     string `msg:"m"`          // 错误信息 (用于日志和人类阅读)
@@ -14,7 +13,6 @@ type Error struct {
 	TraceID string `msg:"t"`          // (可选) 分布式追踪 ID
 }
 
-// 实现 error 接口，这样它在服务端可以被当做普通 error 返回
 func (e *Error) Error() string {
 	if e.Code == ClientStandardError || e.Code == ServerStandardError || e.Code == RemoteStandardError {
 		return e.Msg
@@ -32,7 +30,6 @@ func (e *Error) WithTraceID(traceID string) *Error {
 	return e
 }
 
-// 辅助构造函数
 func New(code T, msg string) *Error {
 	return &Error{Code: code, Msg: msg}
 }

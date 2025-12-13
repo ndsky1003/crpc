@@ -21,7 +21,7 @@ type Context struct {
 	BodyBytes []byte // 原始 Body 数据
 
 	// 错误处理
-	Err error
+	err error
 
 	// 内部控制
 	handlers HandlersChain
@@ -37,6 +37,19 @@ func (c *Context) Next() {
 		c.handlers[c.index](c)
 		c.index++
 	}
+}
+
+func (c *Context) SetError(err error) {
+	c.err = err
+}
+
+func (c *Context) Err() error {
+	return c.err
+}
+
+func (c *Context) AbortWithError(err error) {
+	c.SetError(err)
+	c.Abort()
 }
 
 func (c *Context) Abort() {
