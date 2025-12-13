@@ -567,13 +567,20 @@ func (c *Client) _go(ctx *Context, ht headertype.T) (call *Call) {
 		return
 	}
 
+	if ht != headertype.Send {
+		c.pending.Store(seq, call)
+	}
+
 	if err := c.client.Sends(ctx.Ctx, packet, &opt.Option); err != nil {
+		if ht != headertype.Send {
+			c.pending.Delete(seq)
+		}
 		call.Error = errors.New(errors.ClientInternal, err.Error())
 		call.done()
 		return
 	}
+
 	if ht != headertype.Send {
-		c.pending.Store(seq, call)
 		stop := context.AfterFunc(ctx.Ctx, func() {
 			// 原子性抢占：如果能删掉，说明是超时导致的结束
 			if _, loaded := c.pending.LoadAndDelete(seq); loaded {
