@@ -54,7 +54,6 @@ func (this *Call) done() {
 
 	if this.ctx != nil {
 		this.ctx.invokeHooks(this.Reply, this.Error)
-		this.ctx.releaseContext()
 		this.ctx = nil
 	}
 

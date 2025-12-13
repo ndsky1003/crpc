@@ -1,8 +1,8 @@
+// 放弃池化
 package server
 
 import (
 	"math"
-	"sync"
 
 	"github.com/ndsky1003/crpc/v3/protocol/header"
 	"github.com/ndsky1003/net/server"
@@ -75,34 +75,4 @@ func (c *Context) Get(key string) (any, bool) {
 	}
 	val, ok := c.Keys[key]
 	return val, ok
-}
-
-func (c *Context) reset() {
-	c.Sess = nil
-	c.Header = nil
-	c.MetaBytes = nil
-	c.BodyBytes = nil
-	c.Err = nil
-	c.index = -1
-	c.Keys = nil
-	for i := range c.handlers {
-		c.handlers[i] = nil
-	}
-	c.handlers = c.handlers[:0]
-}
-
-// releaseContext 释放 Context
-func (c *Context) releaseContext() {
-	c.reset()
-	serverContextPool.Put(c)
-}
-
-var serverContextPool = sync.Pool{
-	New: func() any {
-		return &Context{index: -1}
-	},
-}
-
-func obtainContext() *Context {
-	return serverContextPool.Get().(*Context)
 }

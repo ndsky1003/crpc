@@ -686,15 +686,19 @@ func (c *Client) finalMiddleware(callType headertype.T) HandlerFunc {
 // executeChain 统一执行流
 func (c *Client) executeChain(ctx context.Context, callType headertype.T, serviceName, method string, args, reply any, opts ...*Option) *Call {
 	// 1. 从 Pool 获取 Context
-	mCtx := obtainContext()
 
-	// 2. 初始化
-	mCtx.Ctx = ctx
-	mCtx.Service = serviceName
-	mCtx.Method = method
-	mCtx.Args = args
-	mCtx.Reply = reply
-	mCtx.Opts = opts
+	mCtx := &Context{
+		Ctx:     ctx,
+		Service: serviceName,
+		Method:  method,
+		Args:    args,
+		Reply:   reply,
+		Opts:    opts,
+		index:   -1,
+		// 预分配切片 (可选优化)
+		handlers: make(HandlersChain, 0, len(c.handlers)+1),
+		hooks:    make([]responseHook, 0, 4),
+	}
 
 	mCtx.handlers = mCtx.handlers[:0]
 	if len(c.handlers) > 0 {
@@ -730,7 +734,6 @@ func (c *Client) executeChain(ctx context.Context, callType headertype.T, servic
 	// 此时 mCtx 还没来得及被 done() 释放，必须在这里手动释放！
 	if mCtx.Call.Error != nil {
 		mCtx.invokeHooks(nil, mCtx.Call.Error) // 触发 hooks (如监控耗时)
-		mCtx.releaseContext()                  // 归还 Context 到池子
 		mCtx.Call.ctx = nil                    // 断开引用，防止野指针
 		return mCtx.Call
 	}

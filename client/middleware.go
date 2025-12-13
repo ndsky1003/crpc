@@ -1,9 +1,9 @@
+// 放弃池化，这复杂度，特别是Go调用后面必须记得放回池子，增加心智负担
 package client
 
 import (
 	"context"
 	"math"
-	"sync"
 )
 
 // HandlerFunc 定义中间件处理函数
@@ -102,48 +102,4 @@ func (c *Context) invokeHooks(ret any, err error) {
 	for i := len(c.hooks) - 1; i >= 0; i-- {
 		c.hooks[i](ret, err)
 	}
-}
-
-// reset 重置状态以复用
-func (c *Context) reset() {
-	c.Ctx = nil
-	c.Service = ""
-	c.Method = ""
-	c.Args = nil
-	c.Reply = nil
-	c.Opts = nil
-	c.Call = nil
-	c.err = nil
-	c.handlers = nil
-	c.index = -1
-	for i := range c.hooks {
-		c.hooks[i] = nil
-	}
-	c.hooks = c.hooks[:0]
-	for i := range c.handlers {
-		c.handlers[i] = nil
-	}
-	c.handlers = c.handlers[:0]
-
-}
-
-// releaseContext 释放自身回池
-func (c *Context) releaseContext() {
-	c.reset()
-	contextPool.Put(c)
-}
-
-var contextPool = sync.Pool{
-	New: func() any {
-		return &Context{
-			index:    -1,
-			hooks:    make([]responseHook, 0, 4), // 预分配一点空间
-			handlers: make(HandlersChain, 0, 4),  // 预分配 handlers 避免扩容
-		}
-	},
-}
-
-// obtainContext 包级私有获取方法
-func obtainContext() *Context {
-	return contextPool.Get().(*Context)
 }

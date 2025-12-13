@@ -123,7 +123,19 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		defer copy_meta.Release()
 		defer copy_body.Release()
 		// 1. 获取 Context
-		ctx := obtainContext()
+		handlers := make(HandlersChain, 0, len(s.handlers)+1)
+		if len(s.handlers) > 0 {
+			handlers = append(handlers, s.handlers...)
+		}
+		ctx := &Context{
+			Sess:      sess,
+			Header:    h,
+			MetaBytes: copy_meta.Bytes()[:meta_l],
+			BodyBytes: copy_body.Bytes()[:body_l],
+			index:     -1,
+			handlers:  handlers,
+			// Keys map 不需要预分配，用到再分配，省内存
+		}
 
 		// 2. 初始化
 		ctx.Sess = sess
@@ -138,12 +150,7 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 			c.SetError(err)
 		}
 
-		// 4. 组装链 (Prepend existing handlers)
-		if len(s.handlers) > 0 {
-			ctx.handlers = append(s.handlers, finalHandler)
-		} else {
-			ctx.handlers = HandlersChain{finalHandler}
-		}
+		ctx.handlers = append(ctx.handlers, finalHandler)
 
 		// 5. 执行
 		ctx.Next()
@@ -162,13 +169,10 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 			}
 		} else {
 			// Send 类型 (OneWay)：仅记录日志，不回包
-			if ctx.Err != nil {
-				logger.Warnf("async send request process error: %v", ctx.Err)
+			if err := ctx.Err(); err != nil {
+				logger.Warnf("async send request process error: %v", err)
 			}
 		}
-
-		// 7. 释放 Context
-		ctx.releaseContext()
 	}
 	if err = s.workPool.Submit(task); err != nil {
 		h.Release()
