@@ -338,13 +338,22 @@ func (c *Client) sendPacket(ctx context.Context, packet [][]byte, opts ...*Optio
 	return c.client.Sends(ctx, packet, &opt.Option)
 }
 
-func (c *Client) _go(ctx context.Context, ht headertype.T, service, method string, args, reply any, opts ...*Option) (call *Call) {
+func (c *Client) _go(ctx *Context, ht headertype.T) (call *Call) {
 	call = NewCall()
+	defer func() {
+		if call.Error != nil {
+			call.ctx = nil //回退ctx的控制权，因为上级executeChain，还要使用，再上级释放mCtx
+		}
+	}()
+	ctx.Call = call
+	call.ctx = ctx
 	if ctx == nil {
 		call.Error = errors.New(errors.ClientInvalidArgs, "context is required")
 		call.done()
 		return
 	}
+	service := ctx.Service
+	method := ctx.Method
 	if service == "" {
 		call.Error = errors.New(errors.ClientInvalidArgs, "service name is required")
 		call.done()
@@ -356,12 +365,12 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 		call.done()
 		return
 	}
-	opt := c.opt.Merge(opts...)
+	opt := c.opt.Merge(ctx.Opts...)
 
 	traceID := ""
 	if tid := opt.TraceID; tid != nil {
 		traceID = *tid
-		ctx = trace.WithTraceID(ctx, traceID)
+		ctx.Ctx = trace.WithTraceID(ctx.Ctx, traceID)
 	}
 	seq := atomic.AddUint64(&c.seq, 1)
 	h := header.Get()
@@ -381,7 +390,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 	}
 
 	var finalDeadline time.Time
-	if d, ok := ctx.Deadline(); ok {
+	if d, ok := ctx.Ctx.Deadline(); ok {
 		finalDeadline = d
 	}
 	if opt.Timeout != nil && *opt.Timeout > 0 {
@@ -417,7 +426,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 
 		// 2. 启动独立的消费协程
 		// 将 ctx 传入，以便在请求超时/取消时退出循环
-		// go c.processBroadcastLoop(subCtx, call)
+		go c.processBroadcastLoop(subCtx, call)
 	}
 
 	if *opt.Debug {
@@ -431,7 +440,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 	var metaBytes []byte
 
 	// 准备本地调用需要的对象
-	var bodyObj any = args
+	var bodyObj any = ctx.Args
 	var metaObj any = nil
 	if opt.Meta != nil {
 		metaObj = opt.Meta
@@ -441,7 +450,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 
 	if needNetwork {
 		var err error
-		bodyBytes, err = coder.Marshal(h.ReqCoderT, args)
+		bodyBytes, err = coder.Marshal(h.ReqCoderT, bodyObj)
 		if err != nil {
 			h.Release()
 			call.Error = errors.New(errors.ClientInternal, err.Error())
@@ -461,18 +470,18 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 		}
 	}
 	call.seq = seq
-	call.Reply = reply
+	call.Reply = ctx.Reply
 	metaT := *opt.MetaCoderT
 	reqT := *opt.ReqCoderT
 	resT := *opt.ResCoderT
 
 	// 闭包：执行本地逻辑
-	runLocal := func() {
+	runLocal := func(tmpCtx context.Context) {
 		// 调用本地服务
 		// 注意：invoke_local_func 内部还是使用了反射调用生成的 HandleMsg，
 		// 如果追求极致性能，HandleMsg 应该接受 any 类型的 args，目前架构下为了兼容仍传 bytes。
 		// 但返回值 res 是 interface{}，不需要反序列化。
-		res, err := c.invoke_local_func(ctx, module, method, metaT, reqT, metaObj, bodyObj)
+		res, err := c.invoke_local_func(tmpCtx, module, method, metaT, reqT, metaObj, bodyObj)
 
 		if h.Flags.IsBroadcast() {
 			// 广播模式：构造结果推入 channel
@@ -535,14 +544,14 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 	// 场景 1: 纯本地单播 -> 只跑本地，不发包
 	if isUnicastLocal {
 		h.Release() // 不需要发包了，释放头
-		go runLocal()
+		go runLocal(ctx.Ctx)
 		return call
 	}
 
 	// 场景 2: 广播且本地也有 -> 跑本地 + 发包(排除自己)
 	if h.Flags.IsBroadcast() && hasLocalModule {
 		h.Flags.Add(headerflags.ExcludeSender) // [关键] 标记告诉 Server 不要发给我
-		go runLocal()
+		go runLocal(ctx.Ctx)
 		// 继续往下走，发送网络包给其他人
 	}
 
@@ -554,7 +563,7 @@ func (c *Client) _go(ctx context.Context, ht headertype.T, service, method strin
 		return
 	}
 
-	if err := c.client.Sends(ctx, packet, &opt.Option); err != nil {
+	if err := c.client.Sends(ctx.Ctx, packet, &opt.Option); err != nil {
 		call.Error = errors.New(errors.ClientInternal, err.Error())
 		call.done()
 		return
@@ -658,19 +667,19 @@ func (c *Client) Use(middleware ...HandlerFunc) {
 func (c *Client) finalMiddleware(callType headertype.T) HandlerFunc {
 	return func(ctx *Context) {
 		// 使用 ctx.Ctx (可能被中间件修改过)
-		call := c._go(ctx.Ctx, callType, ctx.Service, ctx.Method, ctx.Args, ctx.Reply, ctx.Opts...)
+		c._go(ctx, callType)
 
 		// 双向绑定：让 Context 和 Call 互相引用
 		// 1. Context 持有 Call，以便中间件后续可以访问 Call 的信息
-		ctx.Call = call
+		// ctx.Call = call
 
 		// 2. Call 持有 Context，以便 Call 结束时触发回调并释放 Context
-		call.ctx = ctx
+		// call.ctx = ctx
 		// : 确保绑定完成后，再启动广播处理循环
 		// 这样 processBroadcastLoop 内部就能安全使用 call.ctx 了
-		if call.broadcastCh != nil {
-			go c.processBroadcastLoop(call.subCtx, call)
-		}
+		// if call.broadcastCh != nil {
+		// 	go c.processBroadcastLoop(call.subCtx, call)
+		// }
 	}
 }
 
