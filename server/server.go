@@ -37,6 +37,7 @@ func New(ctx context.Context, opts ...*Option) *Server {
 	return s
 }
 
+// WARN: 这里面如果有异步，那么必须将Context Clone一份来维持新的生命周期，因为里面的Header是池化对象，有可能已经释放掉了
 func (s *Server) Use(middleware ...HandlerFunc) {
 	s.mgr.Use(middleware...)
 }

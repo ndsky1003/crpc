@@ -229,20 +229,14 @@ func (c *Client) invoke_local_func(ctx context.Context, mod, method string, meta
 func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) error {
 	defer h.Release()
 	seq := h.Seq
-
-	// 1. 修正：使用 Load 而不是 LoadAndDelete
-	// 防止广播流中间出现 "真空期" 导致后续包丢失
-	val, ok := c.pending.Load(seq)
-	if !ok {
-		return nil // 确实找不到了（可能已超时被清理）
-	}
-	call := val.(*Call)
-
-	// 2. 统一处理逻辑，减少重复代码
-	// 无论是 OK 还是 Error，如果是广播，流程都很像
 	isBroadcast := h.Flags.IsBroadcast()
 
 	if isBroadcast {
+		val, ok := c.pending.Load(seq)
+		if !ok {
+			return nil // 确实找不到了（可能已超时被清理）
+		}
+		call := val.(*Call)
 		d := &broadcastResult{rawBody: body, resCoderT: h.ResCoderT, code: h.Code, IsEOS: h.Flags.IsEOS()}
 		select {
 		case call.broadcastCh <- d:
@@ -259,16 +253,18 @@ func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) err
 			call.done()
 		}
 	} else {
-		defer func() {
-			c.pending.Delete(seq)
-			call.done()
-		}()
+		val, ok := c.pending.LoadAndDelete(seq)
+		if !ok {
+			return nil // 确实找不到了（可能已超时被清理）
+		}
+		call := val.(*Call)
 		if h.Code.IsOK() {
 			if call.Reply != nil {
 				if err := coder.Unmarshal(h.ResCoderT, body, call.Reply); err != nil {
 					call.Error = errors.New(errors.ClientInternal, err.Error())
 				}
 			}
+			call.done()
 		} else {
 			var resErr errors.Error
 			if err := coder.Unmarshal(coder.Msgp, body, &resErr); err != nil {
@@ -277,9 +273,9 @@ func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) err
 				resErr.WithTraceID(h.TraceID)
 				call.Error = &resErr
 			}
+			call.done()
 		}
 	}
-
 	return nil
 }
 
@@ -400,10 +396,18 @@ func (c *Client) _go(ctx *Context, ht headertype.T) (call *Call) {
 		}
 	}
 
+	var cancelFn context.CancelFunc
 	if !finalDeadline.IsZero() {
+		ctx.Ctx, cancelFn = context.WithDeadline(ctx.Ctx, finalDeadline)
 		h.Deadline = uint64(finalDeadline.UnixMicro())
 	} else {
 		h.Deadline = 0
+	}
+
+	call.cleanup = func() {
+		if cancelFn != nil {
+			cancelFn()
+		}
 	}
 
 	if b := opt.Broadcast; b != nil && *b {
@@ -570,6 +574,25 @@ func (c *Client) _go(ctx *Context, ht headertype.T) (call *Call) {
 	}
 	if ht != headertype.Send {
 		c.pending.Store(seq, call)
+		stop := context.AfterFunc(ctx.Ctx, func() {
+			// 原子性抢占：如果能删掉，说明是超时导致的结束
+			if _, loaded := c.pending.LoadAndDelete(seq); loaded {
+				call.Error = ctx.Ctx.Err()
+				if call.Error == nil {
+					call.Error = context.DeadlineExceeded
+				}
+				call.done()
+			}
+		})
+
+		// ------------------------------------------------------------------
+		// 当请求正常返回时 (handleRes -> call.done)，主动停止 Timer 并释放 Context 资源
+		call.cleanup = func() {
+			stop() // 停止 AfterFunc 的监听，省资源
+			if cancelFn != nil {
+				cancelFn() // 立即释放 WithDeadline 创建的 Timer
+			}
+		}
 	}
 	return call
 }
@@ -645,8 +668,23 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 						return
 					}
 				default:
-					return
+					// 通道空了，跳出排空循环，去报超时
+					goto TIMEOUT_EXIT
 				}
+			}
+		TIMEOUT_EXIT:
+			// 【关键步骤 B】：补发超时通知
+			// 既然走到这里，说明还没遇到 EOS 就被掐断了。
+			// 我们需要人工合成一个 (err=Timeout, eos=true) 的回调。
+
+			// 优先取 call.Error (由 AfterFunc 设置的准确错误)
+			finalErr := call.Error
+			if finalErr == nil {
+				finalErr = ctx.Err() // 兜底
+			}
+			// 告诉用户：结束了(EOS=true)，原因是 finalErr
+			if f := call.BroadcastResCallBack; f != nil {
+				f(nil, finalErr, true)
 			}
 		case res, ok := <-call.broadcastCh:
 			if !ok {

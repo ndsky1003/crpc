@@ -32,6 +32,8 @@ type Call struct {
 	subCancel            context.CancelFunc
 	//broadcast 相关字段 end
 
+	cleanup func()
+
 	finished atomic.Bool
 	Done     chan *Call
 }
@@ -45,6 +47,10 @@ func NewCall() *Call {
 func (this *Call) done() {
 	if !this.finished.CompareAndSwap(false, true) {
 		return
+	}
+
+	if this.cleanup != nil {
+		this.cleanup()
 	}
 
 	// 这会让 processBroadcastLoop 安全退出，而不需要关闭 channel
