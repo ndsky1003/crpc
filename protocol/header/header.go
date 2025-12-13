@@ -367,3 +367,11 @@ func writeString(b []byte, s string) int {
 	copy(b[n:], s)
 	return n + len(s)
 }
+
+func (h *Header) Clone() *Header {
+	if h == nil {
+		return nil
+	}
+	newH := *h
+	return &newH
+}

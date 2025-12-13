@@ -129,7 +129,7 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		}
 		ctx := &Context{
 			Sess:      sess,
-			Header:    h,
+			Header:    h, //一个池化对象，放到了一个非池化的身上,现在的环境下，生命周期是一样的，所以不存在问题
 			MetaBytes: copy_meta.Bytes()[:meta_l],
 			BodyBytes: copy_body.Bytes()[:body_l],
 			index:     -1,

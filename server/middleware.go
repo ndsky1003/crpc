@@ -2,6 +2,7 @@
 package server
 
 import (
+	"maps"
 	"math"
 
 	"github.com/ndsky1003/crpc/v3/protocol/header"
@@ -16,9 +17,9 @@ type Context struct {
 	Sess server.Session
 
 	// 原始数据信息
-	Header    *header.Header
-	MetaBytes []byte // 原始 Meta 数据
-	BodyBytes []byte // 原始 Body 数据
+	Header    *header.Header //这个是池化的
+	MetaBytes []byte         // 原始 Meta 数据
+	BodyBytes []byte         // 原始 Body 数据
 
 	// 错误处理
 	err error
@@ -75,4 +76,40 @@ func (c *Context) Get(key string) (any, bool) {
 	}
 	val, ok := c.Keys[key]
 	return val, ok
+}
+
+func (c *Context) Clone() *Context {
+	// 1. 浅拷贝 (复制 index, err, Sess 等值类型/接口)
+	ctx := *c
+
+	// 2. 【关键】深拷贝 Header (解耦 Header 池化)
+	if c.Header != nil {
+		ctx.Header = c.Header.Clone()
+	}
+
+	// 3. 【关键】深拷贝 Keys (防止并发读写 Map Panic)
+	if c.Keys != nil {
+		newKeys := make(map[string]any, len(c.Keys))
+		maps.Copy(newKeys, c.Keys)
+		ctx.Keys = newKeys
+	} else {
+		ctx.Keys = nil // 确保新对象是干净的
+	}
+
+	// 4. 【关键】深拷贝 Body/Meta (防止 Use-After-Free)
+	// 因为原 Context 的 Bytes 指向的是 buffer pool，请求结束会被回收。
+	// 异步任务必须拥有自己独立的内存副本。
+	if len(c.MetaBytes) > 0 {
+		ctx.MetaBytes = make([]byte, len(c.MetaBytes))
+		copy(ctx.MetaBytes, c.MetaBytes)
+	}
+	if len(c.BodyBytes) > 0 {
+		ctx.BodyBytes = make([]byte, len(c.BodyBytes))
+		copy(ctx.BodyBytes, c.BodyBytes)
+	}
+
+	// 注意：handlers 链不需要拷贝，因为它是只读的函数切片，且长期存在。
+	// Sess (Session) 也不需要拷贝，因为 net.Conn 是线程安全的。
+
+	return &ctx
 }
