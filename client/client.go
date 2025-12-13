@@ -249,6 +249,7 @@ func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) err
 			log.Printf("seq:%v,service:%v:data%+v", h.Seq, h.ToService, d)
 		}
 		if h.Flags.IsEOS() {
+			call.normalStop.Store(true) // 标记为正常结束,可能响应过快最后一个包被丢弃了，但是还是当成正常结束
 			c.pending.Delete(seq)
 			call.done()
 		}
@@ -680,6 +681,12 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 				}
 			}
 		TIMEOUT_EXIT:
+			if call.normalStop.Load() {
+				if f := call.BroadcastResCallBack; f != nil {
+					f(nil, nil, true)
+				}
+				return
+			}
 			// 【关键步骤 B】：补发超时通知
 			// 既然走到这里，说明还没遇到 EOS 就被掐断了。
 			// 我们需要人工合成一个 (err=Timeout, eos=true) 的回调。

@@ -30,6 +30,7 @@ type Call struct {
 	broadcastCh          chan *broadcastResult
 	subCtx               context.Context
 	subCancel            context.CancelFunc
+	normalStop           atomic.Bool //表示是否收到过EOS
 	//broadcast 相关字段 end
 
 	cleanup func()
