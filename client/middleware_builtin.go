@@ -270,16 +270,6 @@ func MwTransport(c *Client) HandlerFunc {
 		}
 		if ctx.CallType != headertype.Send {
 			c.pending.Store(seq, call)
-		}
-
-		if err := c.client.Sends(ctx.Ctx, packet, &ctx.MergedOpt.Option); err != nil {
-			if ctx.CallType != headertype.Send {
-				c.pending.Delete(seq)
-			}
-			ctx.AbortWithError(errors.New(errors.ClientInternal, err.Error()))
-			return
-		}
-		if ctx.CallType != headertype.Send {
 			stop := context.AfterFunc(ctx.Ctx, func() {
 				if _, loaded := c.pending.LoadAndDelete(seq); loaded {
 					call.Error = ctx.Ctx.Err()
@@ -296,6 +286,14 @@ func MwTransport(c *Client) HandlerFunc {
 					oldCleanup()
 				}
 			}
+		}
+
+		if err := c.client.Sends(ctx.Ctx, packet, &ctx.MergedOpt.Option); err != nil {
+			if ctx.CallType != headertype.Send {
+				c.pending.Delete(seq)
+			}
+			ctx.AbortWithError(errors.New(errors.ClientInternal, err.Error()))
+			return
 		}
 	}
 }

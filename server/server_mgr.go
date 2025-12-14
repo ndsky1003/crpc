@@ -198,6 +198,9 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 	h.UUID = sess.ID() //返回链路
 	val, ok := s.services.Load(h.ToService)
 	if !ok {
+		if h.Type == headertype.Req && h.Flags.IsBroadcast() { //send 不需要回
+			h.Flags.With(headerflags.EOS)
+		}
 		logger.Warnf("Service %s not found for request", h.ToService)
 		return errors.Newf(errors.ServerServiceNotFound, "service %s not found", h.ToService)
 	}
@@ -205,6 +208,9 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 	timeout := *s.opt.SendTimeout
 	if deadline := h.Deadline; deadline != 0 {
 		if t := time.Until(time.UnixMicro(int64(deadline))); t <= 0 {
+			if h.Type == headertype.Req && h.Flags.IsBroadcast() { //send 不需要回
+				h.Flags.With(headerflags.EOS)
+			}
 			return errors.New(errors.ServerDeadlineExceeded, "broadcast request deadline exceeded")
 		} else {
 			timeout = t
