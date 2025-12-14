@@ -89,6 +89,9 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 			now := uint64(time.Now().UnixMicro())
 			if now >= h.Deadline {
 				// 可选：回包告知 Client 已超时（虽然 Client 可能已经不等了，但为了协议完整性建议回）
+				if h.Type == headertype.Req && h.Flags.IsBroadcast() { //send 不需要回
+					h.Flags.With(headerflags.EOS)
+				}
 				defer h.Release()
 				return s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "server-side timeout deadline exceeded"))
 			}

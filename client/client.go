@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -99,6 +100,10 @@ func (c *Client) executeChain(ctx context.Context, callType headertype.T, servic
 	// 如果需要支持 Option 级别的中间件，可以在这里拼接
 	mCtx.handlers = c.handlers
 
+	if len(c.handlers) == 0 {
+		mCtx.SetError(errors.New(errors.ClientInternal, "client is closed or not initialized"))
+	}
+
 	mCtx.Next()
 
 	//Context <=> 尚未绑定上关系的时候
@@ -131,8 +136,16 @@ func (c *Client) dispatchBroadcast(call *Call, res *broadcastResult) bool {
 
 	var reply any
 	var resErr error
-	if res.res != nil { // 本地调用优化，直接有对象
-		reply = res.res
+	if res.fromLocal { // 本地调用优化，直接有对象
+		if res.code.IsOK() {
+			reply = res.res
+		} else {
+			var ok bool
+			if resErr, ok = res.res.(error); !ok {
+				resErr = errors.New(errors.ClientCallError, fmt.Sprintf("err:%v", res.res))
+			}
+		}
+
 	} else if res.code.IsOK() {
 		reply = call.BroadcastResNewFunc()
 		if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
