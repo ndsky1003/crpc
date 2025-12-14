@@ -31,10 +31,22 @@ func (z *FileTransfer) DecodeMsg(dc *msgp.Reader) (err error) {
 				return
 			}
 		case "d":
-			z.Data, err = dc.ReadBytes(z.Data)
-			if err != nil {
-				err = msgp.WrapError(err, "Data")
-				return
+			if dc.IsNil() {
+				err = dc.ReadNil()
+				if err != nil {
+					err = msgp.WrapError(err, "Data")
+					return
+				}
+				z.Data = nil
+			} else {
+				z.Data, err = dc.ReadBytes(z.Data)
+				if err != nil {
+					err = msgp.WrapError(err, "Data")
+					return
+				}
+				if z.Data == nil {
+					z.Data = make([]byte, 0)
+				}
 			}
 		case "o":
 			z.Offset, err = dc.ReadInt64()
@@ -77,10 +89,17 @@ func (z *FileTransfer) EncodeMsg(en *msgp.Writer) (err error) {
 	if err != nil {
 		return
 	}
-	err = en.WriteBytes(z.Data)
-	if err != nil {
-		err = msgp.WrapError(err, "Data")
-		return
+	if z.Data == nil { // allownil: if nil
+		err = en.WriteNil()
+		if err != nil {
+			return
+		}
+	} else {
+		err = en.WriteBytes(z.Data)
+		if err != nil {
+			err = msgp.WrapError(err, "Data")
+			return
+		}
 	}
 	// write "o"
 	err = en.Append(0xa1, 0x6f)
@@ -114,7 +133,11 @@ func (z *FileTransfer) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.AppendString(o, z.FileName)
 	// string "d"
 	o = append(o, 0xa1, 0x64)
-	o = msgp.AppendBytes(o, z.Data)
+	if z.Data == nil { // allownil: if nil
+		o = msgp.AppendNil(o)
+	} else {
+		o = msgp.AppendBytes(o, z.Data)
+	}
 	// string "o"
 	o = append(o, 0xa1, 0x6f)
 	o = msgp.AppendInt64(o, z.Offset)
@@ -149,10 +172,18 @@ func (z *FileTransfer) UnmarshalMsg(bts []byte) (o []byte, err error) {
 				return
 			}
 		case "d":
-			z.Data, bts, err = msgp.ReadBytesBytes(bts, z.Data)
-			if err != nil {
-				err = msgp.WrapError(err, "Data")
-				return
+			if msgp.IsNil(bts) {
+				bts = bts[1:]
+				z.Data = nil
+			} else {
+				z.Data, bts, err = msgp.ReadBytesBytes(bts, z.Data)
+				if err != nil {
+					err = msgp.WrapError(err, "Data")
+					return
+				}
+				if z.Data == nil {
+					z.Data = make([]byte, 0)
+				}
 			}
 		case "o":
 			z.Offset, bts, err = msgp.ReadInt64Bytes(bts)

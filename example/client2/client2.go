@@ -15,6 +15,11 @@ var c *client.Client
 func main() {
 	c, _ = client.Dial(context.Background(), "client2", ":8080")
 	comm.Default_lient = c
+	c.UseByIndex(0, func(c *client.Context) {
+		now := time.Now()
+		c.Next()
+		fmt.Println("usetime:", time.Since(now))
+	})
 	time.AfterFunc(2e9, run)
 	select {}
 }
@@ -22,7 +27,7 @@ func main() {
 func run() {
 	// ctx := context.Background()
 	// var meta = dto.Meta{Source: "client2"}
-	var req = &dto.Req{Name: "ll"}
+	var req = &dto.Req{Name: "llll"}
 	// var req = "ddd"
 	// var res Res
 	res := comm.ResOnly(req)

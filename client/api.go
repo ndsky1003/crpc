@@ -12,23 +12,27 @@ import (
 // 这样用户可以修改 Args, Opts, Context 等，但不会破坏 Init/Header 的基础环境
 func (c *Client) Use(middleware ...HandlerFunc) {
 	n := len(c.handlers)
-	// 假设默认链最后两个是 Codec 和 Transport
-	// 如果链条被改乱了，默认直接 append
-
-	// 寻找 MwCodec 的位置（简单起见，插入在倒数第二个之前）
 	insertIdx := max(n-2, 0)
+	c.UseByIndex(insertIdx, middleware...)
+}
 
-	// 重新组装: [前置...] + [用户中间件...] + [后置(Codec, Transport)]
+func (c *Client) UseByIndex(index int, middleware ...HandlerFunc) {
+	n := len(c.handlers)
+	if index < 0 {
+		index = 0
+	}
+	if index >= n {
+		index = n
+	}
 	newHandlers := make(HandlersChain, 0, n+len(middleware))
-	newHandlers = append(newHandlers, c.handlers[:insertIdx]...)
+	newHandlers = append(newHandlers, c.handlers[:index]...)
 	newHandlers = append(newHandlers, middleware...)
-	newHandlers = append(newHandlers, c.handlers[insertIdx:]...)
-
+	newHandlers = append(newHandlers, c.handlers[index:]...)
 	c.handlers = newHandlers
 }
 
 // ResetHandlers 允许完全重置中间件链 (给高级用户)
-func (c *Client) ResetHandlers(chain HandlersChain) {
+func (c *Client) ResetMiddleware(chain HandlersChain) {
 	c.handlers = chain
 }
 
@@ -68,9 +72,6 @@ func (c *Client) Send(ctx context.Context, service, method string, args any, opt
 func (c *Client) Close() error {
 	err := c.client.Close()
 	c.serviceMap.Clear()
-	for i := range c.handlers {
-		c.handlers[i] = nil
-	}
-	c.handlers = nil
+	c.handlers = nil //只清空引用就可以了
 	return err
 }

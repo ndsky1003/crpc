@@ -9,7 +9,7 @@ import (
 )
 
 // CtxOnly invokes client3.MyService.CtxOnly
-func CtxOnly(ctx context.Context, opts ...*client.Option) {
+func CtxOnly(ctx context.Context, opts ...*client.Option) error {
 	// Meta 处理 (放入 opts)
 
 	// Req 处理
@@ -21,12 +21,12 @@ func CtxOnly(ctx context.Context, opts ...*client.Option) {
 	// Call 模式：同步等待
 	var resPtr any = nil
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
-	_ = Default_lient.Call(ctx, "client3", "MyService.CtxOnly", reqBody, resPtr, opts...)
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.CtxOnly", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
-	// 无返回值
-	return
+	// 即使原方法无返回值，生成的 Client 也会返回 error
+	return err
 }
 
 // CtxReqPtr invokes client3.MyService.CtxReqPtr
@@ -43,7 +43,7 @@ func CtxReqPtr(ctx context.Context, req *dto.Req, opts ...*client.Option) (*dto.
 	var res dto.Res
 	var resPtr any = &res
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
+	// 【修正】强制捕获 error
 	err := Default_lient.Call(ctx, "client3", "MyService.CtxReqPtr", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
@@ -64,7 +64,7 @@ func CtxReqVal(ctx context.Context, req string, opts ...*client.Option) (string,
 	var res string
 	var resPtr any = &res
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
+	// 【修正】强制捕获 error
 	err := Default_lient.Call(ctx, "client3", "MyService.CtxReqVal", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
@@ -72,7 +72,7 @@ func CtxReqVal(ctx context.Context, req string, opts ...*client.Option) (string,
 }
 
 // Empty invokes client3.MyService.Empty
-func Empty(opts ...*client.Option) {
+func Empty(opts ...*client.Option) error {
 	// Meta 处理 (放入 opts)
 
 	// Req 处理
@@ -85,12 +85,12 @@ func Empty(opts ...*client.Option) {
 	// Call 模式：同步等待
 	var resPtr any = nil
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
-	_ = Default_lient.Call(ctx, "client3", "MyService.Empty", reqBody, resPtr, opts...)
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.Empty", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
-	// 无返回值
-	return
+	// 即使原方法无返回值，生成的 Client 也会返回 error
+	return err
 }
 
 // ErrOnly invokes client3.MyService.ErrOnly
@@ -107,10 +107,11 @@ func ErrOnly(req *dto.Req, opts ...*client.Option) error {
 	// Call 模式：同步等待
 	var resPtr any = nil
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
+	// 【修正】强制捕获 error
 	err := Default_lient.Call(ctx, "client3", "MyService.ErrOnly", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
+	// 即使原方法无返回值，生成的 Client 也会返回 error
 	return err
 }
 
@@ -129,7 +130,7 @@ func Full(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.Opt
 	var res dto.Res
 	var resPtr any = &res
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
+	// 【修正】强制捕获 error
 	err := Default_lient.Call(ctx, "client3", "MyService.Full", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
@@ -152,7 +153,7 @@ func MetaReq(meta *dto.Meta, req *dto.Req, opts ...*client.Option) (*dto.Res, er
 	var res dto.Res
 	var resPtr any = &res
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
+	// 【修正】强制捕获 error
 	err := Default_lient.Call(ctx, "client3", "MyService.MetaReq", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
@@ -160,7 +161,7 @@ func MetaReq(meta *dto.Meta, req *dto.Req, opts ...*client.Option) (*dto.Res, er
 }
 
 // NoReturn invokes client3.MyService.NoReturn
-func NoReturn(req *dto.Req, opts ...*client.Option) {
+func NoReturn(req *dto.Req, opts ...*client.Option) error {
 	// Meta 处理 (放入 opts)
 
 	// Req 处理
@@ -173,12 +174,12 @@ func NoReturn(req *dto.Req, opts ...*client.Option) {
 	// Call 模式：同步等待
 	var resPtr any = nil
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
-	_ = Default_lient.Call(ctx, "client3", "MyService.NoReturn", reqBody, resPtr, opts...)
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.NoReturn", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
-	// 无返回值
-	return
+	// 即使原方法无返回值，生成的 Client 也会返回 error
+	return err
 }
 
 // ReqOnly invokes client3.MyService.ReqOnly
@@ -196,7 +197,7 @@ func ReqOnly(req *dto.Req, opts ...*client.Option) (*dto.Res, error) {
 	var res dto.Res
 	var resPtr any = &res
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
+	// 【修正】强制捕获 error
 	err := Default_lient.Call(ctx, "client3", "MyService.ReqOnly", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
@@ -204,7 +205,7 @@ func ReqOnly(req *dto.Req, opts ...*client.Option) (*dto.Res, error) {
 }
 
 // ResOnly invokes client3.MyService.ResOnly
-func ResOnly(req *dto.Req, opts ...*client.Option) *dto.Res {
+func ResOnly(req *dto.Req, opts ...*client.Option) (*dto.Res, error) {
 	// Meta 处理 (放入 opts)
 
 	// Req 处理
@@ -218,10 +219,9 @@ func ResOnly(req *dto.Req, opts ...*client.Option) *dto.Res {
 	var res dto.Res
 	var resPtr any = &res
 
-	// 修正 _ := 语法错误。如果不需要 error，使用 _ = 忽略
-	_ = Default_lient.Call(ctx, "client3", "MyService.ResOnly", reqBody, resPtr, opts...)
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.ResOnly", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
-	// 只有返回值，忽略错误
-	return &res
+	return &res, err
 }

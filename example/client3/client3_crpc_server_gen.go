@@ -4,14 +4,12 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/example/dto"
 )
 
 func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any) (any, error) {
-	fmt.Println("dddd:", metaData, bodyData)
 	switch method {
 	case "Full":
 		// 1. 准备 Req

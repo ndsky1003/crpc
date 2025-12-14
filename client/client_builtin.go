@@ -183,6 +183,7 @@ func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) err
 			return nil
 		default:
 			//允许丢包,防止客户端阻塞死了
+			//TODO: 看看增买家一个丢包的回调呢
 			log.Printf("seq:%v,service:%v:data%+v", h.Seq, h.ToService, d)
 		}
 		if h.Flags.IsEOS() {
