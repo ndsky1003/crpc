@@ -12,6 +12,7 @@ const (
 	CodeClientForbidden    T = 403 //禁止访问
 	ClientNotFound         T = 404 //找不到
 	ClientMethodNotAllowed T = 405 //方法禁用
+	ClientCallError        T = 406 //方法禁用
 	ClientTooManyRequests  T = 429 //请求过多
 	ClientSendChanExhaust  T = 497 //请求队列已经耗尽
 	ClientCanceled         T = 498 //请求取消

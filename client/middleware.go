@@ -4,6 +4,9 @@ package client
 import (
 	"context"
 	"math"
+
+	"github.com/ndsky1003/crpc/v3/protocol/header"
+	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
 )
 
 // HandlerFunc 定义中间件处理函数
@@ -14,32 +17,38 @@ type HandlersChain []HandlerFunc
 
 type responseHook func(ret any, err error)
 
-// Context 客户端请求上下文
-// 使用 sync.Pool 复用，避免 GC 压力
 type Context struct {
-	// 基础信息 ,透传给_go真正的调用 start
-	Ctx context.Context // Go 标准库 Context，支持修改 (Timeout, Trace 等)
-	// 请求参数 (中间件可读写)
-	Service string
-	Method  string
-	Args    any
-	Reply   any
-	Opts    []*Option
-	// 基础信息 ,透传给_go真正的调用 end
+	// --- 基础输入 (由 Call/Go/Send 传入) ---
+	Ctx      context.Context
+	Service  string
+	Method   string
+	CallType headertype.T // 新增: 记录是 Req, Res 还是 Send
+	Args     any
+	Reply    any
 
-	// 结果信息
+	// --- 中间状态 (由中间件产生) ---
+	MergedOpt *Option        // 合并后的 Option
+	Seq       uint64         // 请求序列号
+	Header    *header.Header // 协议头
+	Module    string         // 解析出的模块名
+	Func      string         // 解析出的方法名
+	MetaBytes []byte         // 序列化后的 Meta
+	BodyBytes []byte         // 序列化后的 Body
+
+	// --- 结果信息 ---
 	Call *Call // 关联的 Call 对象
 	err  error // 发送错误或回包错误
 
-	// 内部状态 --start
+	// --- 内部状态 ---
 	handlers HandlersChain
 	index    int8
-	// 异步回调钩子：用于在收到回包后执行逻辑 (统计耗时等)
+	//NOTE:避免池化，将这个控制权移交到Call上面，共用call的声明周期，
+	//又要保证，这个回调里没有使用Context的代码，因为Context大概率已经放回池子了。
+	//这是用户调用了的，没法保证。
 	hooks []responseHook
-	// 内部状态 --end
 }
 
-// Next 执行下一个中间件
+// Next 执行下一个中间件 ,这里的for是容错率更高
 func (c *Context) Next() {
 	c.index++
 	for c.index < int8(len(c.handlers)) {

@@ -14,6 +14,7 @@ type broadcastResult struct {
 	resCoderT coder.T      // 编码类型
 	code      headercode.T // 是否成功
 	IsEOS     bool         // 是否是结束标志
+	fromLocal bool         // 标记是否来自本地调用 ,支持空返回值，所以必须用一个独立的字段来判断
 }
 
 type Call struct {
