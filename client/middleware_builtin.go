@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ndsky1003/crpc/v3/coder"
-	"github.com/ndsky1003/crpc/v3/comm/trace"
 	"github.com/ndsky1003/crpc/v3/comm/ut"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
@@ -39,10 +38,6 @@ func MwInit(c *Client) HandlerFunc {
 			return
 		}
 
-		if tid := ctx.MergedOpt.TraceID; tid != nil {
-			ctx.Ctx = trace.WithTraceID(ctx.Ctx, *tid)
-		}
-
 		ctx.Seq = atomic.AddUint64(&c.seq, 1)
 		call := NewCall()
 		call.seq = ctx.Seq
@@ -71,7 +66,7 @@ func MwHeader(c *Client) HandlerFunc {
 			SetMethod(ctx.Func).
 			SetSeq(ctx.Seq)
 
-		if tid := trace.GetTraceID(ctx.Ctx); tid != "" {
+		if tid := ctx.MergedOpt.GenTraceID(ctx.Ctx); tid != "" {
 			h.SetTraceID(tid)
 		}
 		if s := opt.HashKey; s != nil {

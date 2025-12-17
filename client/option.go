@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"time"
 
 	"github.com/ndsky1003/crpc/v3/coder"
@@ -18,7 +19,6 @@ type Option struct {
 	Weight               *int                        // 权重,用于负载均衡
 	Timeout              *time.Duration              // 超时时间 ,ctx的优先级更高,没有ctx则使用该值,兜底
 	Secret               *string                     // 用于JWT签名的密钥
-	TraceID              *string                     // 用于链路追踪的TraceID
 	HashKey              *string                     // 用于一致性哈希负载均衡的HashKey
 	VerifyJwtExpire      *time.Duration              // 用于验证JWT过期时间,如果不设置则使用默认值15秒
 	MetaCoderT           *coder.T                    // 用于元数据的编解码器类型
@@ -30,6 +30,10 @@ type Option struct {
 	BroadcastChanCap     *int                        // 广播调用时,每个响应结果的chan容量
 	BroadcastResNewFunc  func() any                  // 用于广播调用时创建返回值对象
 	BroadcastResCallBack func(any, error, bool) bool // 返回true表示继续广播,返回false表示停止广播
+	//链路追踪 从ctx => header => net => header => ctx
+	GenTraceID  func(context.Context) string                              // 用于生成TraceID的函数
+	WithTraceID func(ctx context.Context, traceID string) context.Context // 用于将TraceID添加到context中的函数
+	//链路追踪 从ctx => header => net => header => ctx
 	client.Option
 }
 
@@ -56,11 +60,6 @@ func (o *Option) SetMeta(meta any) *Option {
 
 func (o *Option) SetSecret(secret string) *Option {
 	o.Secret = &secret
-	return o
-}
-
-func (o *Option) SetTraceID(traceID string) *Option {
-	o.TraceID = &traceID
 	return o
 }
 
@@ -145,6 +144,22 @@ func (o *Option) SetBroadcaseResCallBack(f func(any, error, bool) bool) *Option 
 	return o
 }
 
+func (o *Option) SetGenTraceID(f func(context.Context) string) *Option {
+	if o == nil {
+		return o
+	}
+	o.GenTraceID = f
+	return o
+}
+
+func (o *Option) SetWithTraceID(f func(ctx context.Context, traceID string) context.Context) *Option {
+	if o == nil {
+		return o
+	}
+	o.WithTraceID = f
+	return o
+}
+
 // 自动生成merge方法
 func (o *Option) merge(other *Option) *Option {
 	if other == nil || o == nil {
@@ -156,7 +171,6 @@ func (o *Option) merge(other *Option) *Option {
 	ut.ResolveOption(&o.Weight, other.Weight)
 	ut.ResolveOption(&o.BroadcastChanCap, other.BroadcastChanCap)
 	ut.ResolveOption(&o.Secret, other.Secret)
-	ut.ResolveOption(&o.TraceID, other.TraceID)
 	ut.ResolveOption(&o.HashKey, other.HashKey)
 	ut.ResolveOption(&o.VerifyJwtExpire, other.VerifyJwtExpire)
 	ut.ResolveOption(&o.Timeout, other.Timeout)
@@ -172,6 +186,14 @@ func (o *Option) merge(other *Option) *Option {
 
 	if other.BroadcastResCallBack != nil {
 		o.BroadcastResCallBack = other.BroadcastResCallBack
+	}
+
+	if other.GenTraceID != nil {
+		o.GenTraceID = other.GenTraceID
+	}
+
+	if other.WithTraceID != nil {
+		o.WithTraceID = other.WithTraceID
 	}
 
 	o.Option = o.Option.Merge(&other.Option)

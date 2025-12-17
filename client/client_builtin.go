@@ -9,7 +9,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ndsky1003/crpc/v3/coder"
-	"github.com/ndsky1003/crpc/v3/comm/trace"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
 	"github.com/ndsky1003/crpc/v3/protocol/header"
@@ -109,8 +108,8 @@ func (c *Client) HandleMsg(data []byte) error {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
 	ctx := context.Background()
-	if h.TraceID != "" {
-		ctx = trace.WithTraceID(ctx, h.TraceID)
+	if h.TraceID != "" && c.opt.WithTraceID != nil {
+		ctx = c.opt.WithTraceID(ctx, h.TraceID)
 	}
 
 	bodyCopy := make([]byte, len(body))

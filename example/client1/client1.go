@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/ndsky1003/crpc/v3/client"
-	"github.com/ndsky1003/crpc/v3/comm/trace"
 )
 
 // 定义测试用的结构体
@@ -77,8 +76,7 @@ func main() {
 
 // 1. 全量: (Ctx, Meta, Req) -> (Res, error)
 func FnFull(ctx context.Context, meta *Meta, req *Req) (*Res, error) {
-	traceid := trace.GetTraceID(ctx)
-	fmt.Printf("[FnFull] Meta=%v, Req=%v,traceid=%v\n", meta, req, traceid)
+	fmt.Printf("[FnFull] Meta=%v, Req=%v\n", meta, req)
 	return &Res{Msg: "OK from Full"}, nil
 }
 
