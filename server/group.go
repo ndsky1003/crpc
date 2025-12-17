@@ -14,55 +14,52 @@ import (
 	"github.com/ndsky1003/net/server"
 )
 
-// 补充缺失的 ID 方法定义（适配嵌入的 server.Session）
+// Session 包装底层 server.Session，添加服务发现所需的元数据
 type Session struct {
 	Name           string
 	Weight         int
-	server.Session // 假设 server.Session 有 ID() 方法返回唯一标识（如 uint64/string）
+	server.Session // 假设 server.Session 有 ID() 方法返回唯一标识
 }
 
-// 确保 ID() 方法可调用（若 server.Session 的 ID() 返回非 string 类型，需适配）
+// ID 返回 Session 的唯一标识（适配底层 Session）
 func (s *Session) ID() string {
-	// 示例：若底层 Session.ID() 返回 uint64，需转换
-	// return strconv.FormatUint(s.Session.ID(), 10)
-	return s.Session.ID().String() // 假设底层 ID() 返回 fmt.Stringer 或直接返回 string
+	// 假设底层 Session.ID() 返回 fmt.Stringer 或直接返回 string
+	// 若返回 uint64，需改为: return strconv.FormatUint(s.Session.ID(), 10)
+	id := s.Session.ID().String()
+	if id == "" {
+		panic("Session.ID() returned empty string")
+	}
+	return id
 }
 
-// consistentHashRing 封装一致性哈希环的数据，用于原子替换
+// consistentHashRing 一致性哈希环的不可变快照（支持无锁读）
 type consistentHashRing struct {
-	keys    []uint32
-	hashMap map[uint32]string
+	keys       []uint32            // 排序后的哈希值数组
+	sessionMap map[uint32]*Session // 哈希值 -> Session 指针（直接存储，避免二次查找）
 }
 
 // ServiceGroup 管理同名服务的多个连接
 type ServiceGroup struct {
-	// 读写锁：读操作（Select/SelectByKey/Get*）用 RLock，写操作（Add/Remove）用 Lock
-	sync.RWMutex
-	Sessions    []*Session
-	TotalWeight int
-	Name        string
+	sync.RWMutex                     // 保护 Sessions/sessionMap/TotalWeight
+	Sessions     []*Session          // 所有有效节点（Weight > 0）
+	TotalWeight  int                 // 所有节点权重之和
+	Name         string              // 服务组名称
+	ring         atomic.Value        // 存储 *consistentHashRing（原子读写）
+	replicas     int                 // 每个权重单位的虚拟节点数
+	sessionMap   map[string]*Session // sid -> Session 的快速查找表
 
-	// 使用原子变量存储哈希环，读操作无锁
-	ring atomic.Value // Stores *consistentHashRing
-
-	// [一致性哈希参数]
-	replicas int // 每个权重单位的虚拟节点数
-
-	// 辅助 Map，实现 O(1) 查找 Session
-	sessionMap map[string]*Session
-
-	// 并发安全的随机数生成器（替代全局 rand）
+	// 并发安全的随机数生成器
 	randomLock sync.Mutex
 	random     *rand.Rand
 }
 
-// NewServiceGroup 创建服务组，默认 replicas=100（避免传入 0）
+// NewServiceGroup 创建服务组
 func NewServiceGroup(name string, replicas int) *ServiceGroup {
 	if replicas <= 0 {
 		replicas = 100 // 默认每个权重单位生成 100 个虚拟节点
 	}
 
-	// 初始化并发安全的随机数生成器
+	// 初始化加密安全的随机数种子
 	randomSeed, _ := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
 	random := rand.New(rand.NewSource(randomSeed.Int64()))
 
@@ -76,35 +73,36 @@ func NewServiceGroup(name string, replicas int) *ServiceGroup {
 
 	// 初始化空哈希环
 	sg.ring.Store(&consistentHashRing{
-		keys:    []uint32{},
-		hashMap: make(map[uint32]string),
+		keys:       []uint32{},
+		sessionMap: make(map[uint32]*Session),
 	})
 
 	return sg
 }
 
-// hashFunc 使用 FNV-1a 算法，返回 uint32
+// hashFunc 使用 FNV-1a 算法计算哈希值
 func (sg *ServiceGroup) hashFunc(key string) uint32 {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(key)) // 忽略写入错误（字节写入无错误）
+	_, _ = h.Write([]byte(key))
 	return h.Sum32()
 }
 
-// Add 添加/更新 Session，线程安全
+// Add 添加或更新 Session（线程安全）
 func (sg *ServiceGroup) Add(s *Session) {
+	// 权重 ≤ 0 视为删除操作
+	if s.Weight <= 0 {
+		sg.Remove(s.ID())
+		return
+	}
+
 	sg.Lock()
 	defer sg.Unlock()
-
-	// 校验权重（确保非负）
-	if s.Weight < 0 {
-		s.Weight = 0
-	}
 
 	sid := s.ID()
 	oldSession, exists := sg.sessionMap[sid]
 
-	// 处理权重变更
 	if exists {
+		// 更新现有节点
 		if oldSession.Weight > 0 {
 			sg.TotalWeight -= oldSession.Weight
 		}
@@ -121,16 +119,14 @@ func (sg *ServiceGroup) Add(s *Session) {
 	}
 
 	// 更新总权重和映射
-	if s.Weight > 0 {
-		sg.TotalWeight += s.Weight
-	}
+	sg.TotalWeight += s.Weight
 	sg.sessionMap[sid] = s
 
 	// 重建哈希环
 	sg.rebuildHashRing()
 }
 
-// Remove 移除指定 ID 的 Session，线程安全
+// Remove 移除指定 Session（线程安全）
 func (sg *ServiceGroup) Remove(sid string) {
 	sg.Lock()
 	defer sg.Unlock()
@@ -160,56 +156,66 @@ func (sg *ServiceGroup) Remove(sid string) {
 	sg.rebuildHashRing()
 }
 
-// rebuildHashRing 构建新环并原子替换（仅被加锁的写操作调用）
+// rebuildHashRing 重建一致性哈希环（仅在持有写锁时调用）
 func (sg *ServiceGroup) rebuildHashRing() {
-	capacity := sg.TotalWeight * sg.replicas
-	newKeys := make([]uint32, 0, capacity)
-	newHashMap := make(map[uint32]string, capacity)
+	// 1. 计算实际容量（仅统计 Weight > 0 的节点）
+	actualCapacity := 0
+	for _, s := range sg.Sessions {
+		if s.Weight > 0 {
+			actualCapacity += s.Weight * sg.replicas
+		}
+	}
 
+	newKeys := make([]uint32, 0, actualCapacity)
+	newSessionMap := make(map[uint32]*Session, actualCapacity)
+
+	// 2. 为每个节点生成虚拟节点
 	for _, s := range sg.Sessions {
 		if s.Weight <= 0 {
 			continue
 		}
 
-		// 按权重生成虚拟节点（权重为 N 则生成 N*replicas 个虚拟节点）
 		numVirtualNodes := s.Weight * sg.replicas
 		baseKey := s.ID() + "#"
 
 		for i := 0; i < numVirtualNodes; i++ {
-			// 生成虚拟节点 key：基础 ID + 虚拟节点索引
 			virtualKey := baseKey + strconv.Itoa(i)
 			hash := sg.hashFunc(virtualKey)
 
-			// 处理哈希碰撞（追加随机后缀）
+			// 处理哈希碰撞（追加随机后缀重新哈希）
 			for {
-				if _, exists := newHashMap[hash]; !exists {
+				if _, exists := newSessionMap[hash]; !exists {
 					break
 				}
-				// 碰撞时添加随机数后缀重新哈希
-				virtualKey += "#" + strconv.Itoa(sg.random.Intn(1000000))
+				// 并发安全地生成随机数
+				sg.randomLock.Lock()
+				randomSuffix := sg.random.Intn(1000000)
+				sg.randomLock.Unlock()
+
+				virtualKey += "#" + strconv.Itoa(randomSuffix)
 				hash = sg.hashFunc(virtualKey)
 			}
 
 			newKeys = append(newKeys, hash)
-			newHashMap[hash] = s.ID()
+			newSessionMap[hash] = s // 直接存储 Session 指针
 		}
 	}
 
-	// 排序哈希环
+	// 3. 排序哈希环
 	sort.Slice(newKeys, func(i, j int) bool {
 		return newKeys[i] < newKeys[j]
 	})
 
-	// 原子替换哈希环
+	// 4. 原子替换哈希环
 	sg.ring.Store(&consistentHashRing{
-		keys:    newKeys,
-		hashMap: newHashMap,
+		keys:       newKeys,
+		sessionMap: newSessionMap,
 	})
 }
 
-// SelectByKey 一致性哈希选择节点（无锁读环，读映射时用 RLock）
+// SelectByKey 根据 key 使用一致性哈希选择节点（完全无锁）
 func (sg *ServiceGroup) SelectByKey(key string) *Session {
-	// 1. 原子加载哈希环（无锁）
+	// 1. 原子加载哈希环
 	ringVal := sg.ring.Load()
 	ring, ok := ringVal.(*consistentHashRing)
 	if !ok || len(ring.keys) == 0 {
@@ -219,26 +225,21 @@ func (sg *ServiceGroup) SelectByKey(key string) *Session {
 	// 2. 计算 key 的哈希值
 	hash := sg.hashFunc(key)
 
-	// 3. 二分查找第一个大于等于 hash 的节点
+	// 3. 二分查找第一个 >= hash 的虚拟节点
 	idx := sort.Search(len(ring.keys), func(i int) bool {
 		return ring.keys[i] >= hash
 	})
 
-	// 4. 处理边界：哈希值大于所有节点时，取第一个节点
+	// 4. 处理环形边界（哈希值大于所有节点时回绕到第一个）
 	if idx == len(ring.keys) {
 		idx = 0
 	}
 
-	// 5. 获取目标节点 ID（读映射无锁，因为 ring 是不可变的）
-	targetSid := ring.hashMap[ring.keys[idx]]
-
-	// 6. 读 sessionMap（用 RLock 保证并发安全）
-	sg.RLock()
-	defer sg.RUnlock()
-	return sg.sessionMap[targetSid]
+	// 5. 直接返回 Session 指针（无需二次查找）
+	return ring.sessionMap[ring.keys[idx]]
 }
 
-// Select 加权随机选择节点（读锁保护，按权重分配概率）
+// Select 加权随机选择节点（用于负载均衡）
 func (sg *ServiceGroup) Select() *Session {
 	sg.RLock()
 	defer sg.RUnlock()
@@ -250,11 +251,12 @@ func (sg *ServiceGroup) Select() *Session {
 		return sg.Sessions[0]
 	}
 
-	// 加权随机：按总权重生成随机数，遍历找到对应的节点
+	// 加权随机：生成 [0, TotalWeight) 范围内的随机数
 	sg.randomLock.Lock()
 	r := sg.random.Intn(sg.TotalWeight)
 	sg.randomLock.Unlock()
 
+	// 遍历累加权重，找到对应区间的节点
 	current := 0
 	for _, s := range sg.Sessions {
 		if s.Weight <= 0 {
@@ -266,23 +268,18 @@ func (sg *ServiceGroup) Select() *Session {
 		}
 	}
 
-	// 兜底：返回第一个有效节点
-	for _, s := range sg.Sessions {
-		if s.Weight > 0 {
-			return s
-		}
-	}
-	return nil
+	// 不应到达此处（数据不一致时触发 panic）
+	panic("inconsistent state: TotalWeight > 0 but no valid session selected")
 }
 
-// GetBySid 线程安全地获取 Session（读锁）
+// GetBySid 根据 Session ID 获取 Session（线程安全）
 func (sg *ServiceGroup) GetBySid(sid string) *Session {
 	sg.RLock()
 	defer sg.RUnlock()
 	return sg.sessionMap[sid]
 }
 
-// GetAll 线程安全地获取所有 Session 副本（读锁）
+// GetAll 返回所有 Session 的副本（线程安全）
 func (sg *ServiceGroup) GetAll() []*Session {
 	sg.RLock()
 	defer sg.RUnlock()
@@ -291,9 +288,29 @@ func (sg *ServiceGroup) GetAll() []*Session {
 	return result
 }
 
-// GetTotalWeight 返回总权重（读锁）
+// GetTotalWeight 返回总权重（线程安全）
 func (sg *ServiceGroup) GetTotalWeight() int {
 	sg.RLock()
 	defer sg.RUnlock()
 	return sg.TotalWeight
+}
+
+// Metrics 服务组的统计指标
+type Metrics struct {
+	NodeCount        int // 节点数量
+	TotalWeight      int // 总权重
+	VirtualNodeCount int // 虚拟节点数量
+}
+
+// GetMetrics 获取当前统计指标（线程安全）
+func (sg *ServiceGroup) GetMetrics() Metrics {
+	sg.RLock()
+	defer sg.RUnlock()
+
+	ring := sg.ring.Load().(*consistentHashRing)
+	return Metrics{
+		NodeCount:        len(sg.Sessions),
+		TotalWeight:      sg.TotalWeight,
+		VirtualNodeCount: len(ring.keys),
+	}
 }
