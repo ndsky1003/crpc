@@ -126,11 +126,15 @@ func (s *broadcastCounterAll) decreaseBroadcastCount(id uuid.UUID, seq uint64) i
 
 	remain := item.count.Add(-1)
 	if remain <= 0 {
-		if item.timer != nil {
-			item.timer.Stop()
+		if remain == 0 {
+			if item.timer != nil {
+				item.timer.Stop()
+				item.timer = nil
+			}
+			delete(group.items, seq)
+			itemPool.Put(item) // 归还对象
 		}
-		delete(group.items, seq)
-		itemPool.Put(item) // 归还对象
+		return 0
 	}
 	return remain
 }

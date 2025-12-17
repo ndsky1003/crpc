@@ -10,7 +10,7 @@ require (
 require (
 	github.com/golang/snappy v1.0.0
 	github.com/google/uuid v1.6.0
-	github.com/ndsky1003/buffer/v2 v2.0.0-20251215125541-9ed901ffc44c
+	github.com/ndsky1003/buffer/v2 v2.0.0
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/tinylib/msgp v1.6.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1

@@ -41,13 +41,15 @@ func (c *Client) Call(ctx context.Context, service, method string, args, reply a
 	if call.Error != nil {
 		return call.Error
 	}
+	seq := call.seq
 	select {
 	case <-ctx.Done():
 		err := ctx.Err()
 		if err != nil {
 			err = errors.New(errors.ClientInternal, err.Error())
 		}
-		if _, loaded := c.pending.LoadAndDelete(call.seq); loaded {
+		if value, loaded := c.pending.LoadAndDelete(seq); loaded {
+			call := value.(*Call)
 			call.Error = err
 			call.done()
 		}
