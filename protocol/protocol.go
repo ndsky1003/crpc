@@ -79,6 +79,11 @@ func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
 		return nil, nil, nil, err
 	}
 
+	if h.MetaLen > MaxPacketSize || h.BodyLen > MaxPacketSize {
+		h.Release()
+		return nil, nil, nil, ErrPacketTooLarge
+	}
+
 	needed := uint64(4+headLen) + h.MetaLen + h.BodyLen
 
 	if needed < h.MetaLen || needed < h.BodyLen {

@@ -50,7 +50,7 @@ func (b *broadcastCounterAll) Stop() {
 }
 
 // setBroadcastCount 设置计数
-func (s *broadcastCounterAll) setBroadcastCount(id uuid.UUID, seq uint64, count int32, timeout time.Duration) {
+func (s *broadcastCounterAll) setBroadcastCount(id uuid.UUID, seq uint64, count int32, timeout time.Duration, timeoutCallback func()) {
 	// 1. 获取 Group (使用双重检查锁定，尽量减少写锁持有时间)
 	s.l.RLock()
 	group, ok := s.groups[id]
@@ -95,7 +95,9 @@ func (s *broadcastCounterAll) setBroadcastCount(id uuid.UUID, seq uint64, count 
 	item.timer = time.AfterFunc(timeout, func() {
 		group.l.Lock()
 		defer group.l.Unlock()
-
+		if timeoutCallback != nil {
+			timeoutCallback()
+		}
 		if target, exists := group.items[seq]; exists && target == item {
 			delete(group.items, seq)
 			target.timer = nil

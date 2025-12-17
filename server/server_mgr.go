@@ -259,7 +259,10 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 			return err
 		}
 		count := int32(len(realTargets))
-		s.broadcastCounter.setBroadcastCount(sid, seq, count, timeout)
+		callBack := func() {
+			//TODO:这里应该补发一个EOS的回包
+		}
+		s.broadcastCounter.setBroadcastCount(sid, seq, count, timeout, callBack)
 
 		for _, t := range realTargets {
 			target := t

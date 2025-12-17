@@ -125,6 +125,7 @@ func (sg *ServiceGroup) SelectByKey(key string) *Session {
 		sg.Lock()    // 获取写锁
 		// 双重检查
 		if sg.dirty {
+			//TODO: 这里高并发会死锁,这里应该改成copy_on_write
 			sg.rebuildHashRing()
 			sg.dirty = false
 		}
