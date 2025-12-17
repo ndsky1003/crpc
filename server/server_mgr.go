@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -17,7 +18,6 @@ import (
 	"github.com/ndsky1003/crpc/v3/protocol/header/headerflags"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
 	"github.com/ndsky1003/net/conn"
-	"github.com/ndsky1003/net/logger"
 	"github.com/ndsky1003/net/server"
 	"github.com/panjf2000/ants/v2"
 )
@@ -75,7 +75,7 @@ func (s *server_mgr) OnDisconnect(sess server.Session, err error) error {
 
 	//不清理,有可能连接上来,因为重连上来id不会变
 	// broadcastCounter
-	logger.Infof("Session disconnected: %s, err: %v", sid, err)
+	slog.Error("Session disconnected", "sid", sid, "err", err)
 	return nil
 }
 
@@ -163,7 +163,7 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 			if err := ctx.Err(); err != nil {
 				// 优先返回具体的错误信息 (token invalid, rate limit 等)
 				// 不管是否 Abort，只要有 Err，就以 Err 为主
-				logger.Warnf("request process error: %v", err)
+				slog.Warn("request process", "err", err)
 				s.replyError(sess, h, err)
 			} else if ctx.IsAborted() {
 				// 处理 "Abort 但无 Err" 的死角
@@ -173,7 +173,7 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		} else {
 			// Send 类型 (OneWay)：仅记录日志，不回包
 			if err := ctx.Err(); err != nil {
-				logger.Warnf("async send request process error: %v", err)
+				slog.Warn("async send request process", "err", err)
 			}
 		}
 	}
@@ -204,7 +204,7 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 		if h.Type == headertype.Req && h.Flags.IsBroadcast() { //send 不需要回
 			h.Flags.With(headerflags.EOS)
 		}
-		logger.Warnf("Service %s not found for request", h.ToService)
+		slog.Warn("not found for request", "service", h.ToService)
 		return errors.Newf(errors.ServerServiceNotFound, "service %s not found", h.ToService)
 	}
 	group := val.(*ServiceGroup)
@@ -269,7 +269,7 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 					copy_h.Flags.With(headerflags.EOS)
 				}
 				if replyErr := s.replyError(sess, &copy_h, err); replyErr != nil {
-					logger.Error(replyErr)
+					slog.Error("replyError", "err", replyErr)
 				}
 			}
 			task := func() {
@@ -364,7 +364,7 @@ func (s *server_mgr) handleVerify(sess server.Session, body []byte) error {
 
 	s.sidGroupIndex.Store(sess.ID(), req.Name)
 
-	logger.Infof("Service Registered: %s [Sid:%s, Weight:%d]", req.Name, sess.ID(), req.Weight)
+	slog.Info("Service Registered", "Name", req.Name, "sid", sess.ID(), "weight", req.Weight)
 
 	return nil
 }
@@ -419,7 +419,7 @@ func (s *server_mgr) replyError(srcSess server.Session, h *header.Header, rpcErr
 	if h.Type == headertype.Req {
 		h.Type = headertype.Res
 	} else { //send
-		logger.Warnf("no need to reply error for send type, sid: %s, method: %s", srcSess.ID(), h.Method)
+		slog.Warn("no need to reply error for send type", "sid", srcSess.ID(), "method", h.Method)
 		return nil
 	}
 	h.Code = headercode.Failed

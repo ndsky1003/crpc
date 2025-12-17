@@ -30,7 +30,7 @@ func run() {
 	var req = &dto.Req{Name: "llll"}
 	// var req = "ddd"
 	// var res Res
-	res := comm.ResOnly(req)
+	res, _ := comm.ResOnly(req)
 	fmt.Println(res)
 	// err := c.Call(context.Background(), "client1", "cc.FnCtxOnly", req, &res, client.Options().SetMeta(meta).SetTraceID("traceid-client2-001"))
 	// fmt.Println("client2:", " call result:", res, err)

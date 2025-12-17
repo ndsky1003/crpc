@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
-	github.com/ndsky1003/net v0.0.0-20251205095351-a205d45c878f
+	github.com/ndsky1003/net v1.0.1
 )
 
 require (
@@ -21,5 +21,3 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 )
-
-replace github.com/ndsky1003/net => ../net
