@@ -143,11 +143,8 @@ func MwLocal(c *Client) HandlerFunc {
 		_, hasLocalModule := c.serviceMap.Load(ctx.Module)
 		isUnicastLocal := (c.Name == ctx.Service) && hasLocalModule && (ctx.CallType == headertype.Req) && !h.Flags.IsBroadcast()
 
-		var bodyObj = ctx.Args
-		var metaObj any = nil
-		if ctx.MergedOpt.Meta != nil {
-			metaObj = ctx.MergedOpt.Meta
-		}
+		bodyObj := ctx.Args
+		metaObj := ctx.MergedOpt.Meta
 
 		runLocal := func() {
 			defer func() {
@@ -159,10 +156,7 @@ func MwLocal(c *Client) HandlerFunc {
 							fromLocal: true,
 							res:       panicErr,
 						}
-						select {
-						case ctx.Call.broadcastCh <- resObj:
-						default:
-						}
+						ctx.Call.trySendBroadcastResult(resObj)
 					} else {
 						ctx.Call.Error = panicErr
 						ctx.Call.done()
@@ -188,10 +182,7 @@ func MwLocal(c *Client) HandlerFunc {
 					resObj.code = headercode.Failed
 					resObj.res = err
 				}
-				select {
-				case call.broadcastCh <- resObj:
-				case <-call.subCtx.Done():
-				}
+				call.trySendBroadcastResult(resObj)
 			} else {
 				if err != nil {
 					call.Error = err
@@ -222,13 +213,14 @@ func MwLocal(c *Client) HandlerFunc {
 		}
 
 		if isUnicastLocal {
-			go runLocal() //异步函数里必须手动done了
-			ctx.Abort()   //这里没有指定错误，因此不会走到兜底逻辑
+			runLocal()  // 同步执行，避免并发问题,如果异步，并发问题发生在调用后对err的赋值，前面兜底那，又在读err。读写同时发生了
+			ctx.Abort() // 这里没有指定错误，因此不会走到兜底逻辑
 			return
 		}
 		if h.Flags.IsBroadcast() && hasLocalModule {
 			h.Flags.Add(headerflags.ExcludeSender)
-			go runLocal()
+			//NOTE: 有一个风险，本地没执行完成，远端返回一个EOS，本地的就会被丢弃掉
+			go runLocal() //异步的目的是希望本地与远程同时发生
 		}
 		ctx.Next()
 	}
@@ -274,6 +266,7 @@ func MwTransport(c *Client) HandlerFunc {
 		}
 		if ctx.CallType != headertype.Send {
 			c.pending.Store(seq, call)
+			//保证取消的时候直接删掉call，即使现在网络上回来，也已经过时了
 			stop := context.AfterFunc(ctx.Ctx, func() {
 				if _, loaded := c.pending.LoadAndDelete(seq); loaded {
 					call.Error = ctx.Ctx.Err()

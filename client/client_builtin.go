@@ -4,7 +4,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"time"
 
@@ -75,11 +74,12 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	h.Release()
 
 	// 等待验证响应 -----------------------------------------------
-	respData, err := c.Read(conn.Options().SetReadTimeout(time_out))
+	data, err := c.Read(conn.Options().SetReadTimeout(time_out))
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
-	res_h, _, resBody, err := protocol.Unpack(respData)
+	defer netpool.Release(data)
+	res_h, _, resBody, err := protocol.Unpack(data)
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
@@ -112,18 +112,27 @@ func (c *Client) HandleMsg(data []byte) error {
 	if h.TraceID != "" && c.opt.WithTraceID != nil {
 		ctx = c.opt.WithTraceID(ctx, h.TraceID)
 	}
+	//返回的广播合并成单线程
+	if h.Type.IsRes() && h.Flags.IsBroadcast() {
+		defer netpool.Release(data)
+		defer h.Release()
+		if err := c.handleRes(ctx, h, body); err != nil {
+			slog.Error("handleRes", "err", err)
+		}
+		return nil
+	}
 
 	go func() {
 		defer netpool.Release(data)
 		defer h.Release()
 		switch {
 		case h.Type.IsReq():
-			c.handleReq(ctx, h, meta, body)
+			if err := c.handleReq(ctx, h, meta, body); err != nil {
+				slog.Error("handleReq", "err", err)
+			}
 		case h.Type.IsRes():
-			//TODO: 这里广播的话得,有问题,后发的EOS可能先处理 轻操作（仅转发），怕乱序（EOS竞态），所以同步
-			// 之前广播这里是同步的
 			if err := c.handleRes(ctx, h, body); err != nil {
-				log.Println("handleRes :", err)
+				slog.Error("handleRes", "err", err)
 			}
 		default:
 			slog.Error("unknown header type", "type", h.Type)
@@ -170,22 +179,10 @@ func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) err
 		}
 		call := val.(*Call)
 		d := &broadcastResult{rawBody: body, resCoderT: h.ResCoderT, code: h.Code, IsEOS: h.Flags.IsEOS()}
-		select {
-		case call.broadcastCh <- d:
-		case <-call.subCtx.Done():
-			// [安全保护] 消费者已死 (可能用户取消了，或者并发的其他 EOS 导致退出了)
-			// 此时直接丢弃消息，不阻塞，也不 panic
-			return nil
-		default:
-			//允许丢包,防止客户端阻塞死了
-			//TODO: 看看增买家一个丢包的回调呢
-			log.Printf("seq:%v,service:%v:data%+v", h.Seq, h.ToService, d)
-		}
 		if h.Flags.IsEOS() {
 			call.normalStop.Store(true) // 标记为正常结束,可能响应过快最后一个包被丢弃了，但是还是当成正常结束
-			c.pending.Delete(seq)
-			call.done()
 		}
+		call.trySendBroadcastResult(d)
 	} else {
 		val, ok := c.pending.LoadAndDelete(seq)
 		if !ok {
@@ -201,11 +198,15 @@ func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) err
 			call.done()
 		} else {
 			var resErr errors.Error
-			if err := coder.Unmarshal(coder.Msgp, body, &resErr); err != nil {
+			if err := coder.Unmarshal(h.ResCoderT, body, &resErr); err != nil {
 				call.Error = errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
 			} else {
-				resErr.WithTraceID(h.TraceID)
-				call.Error = &resErr
+				if resErr.Code != errors.None {
+					if h.TraceID != "" {
+						resErr.WithTraceID(h.TraceID)
+					}
+					call.Error = &resErr
+				}
 			}
 			call.done()
 		}

@@ -2,7 +2,9 @@ package errors
 
 type T = uint16
 
-const None T = 0 //是一个假错误,不是真的错误,既没有返回值,也没有错误,需要,就是作为特殊功能的返回.eg:重置客户端的EOS
+// 是一个假错误,不是真的错误,既没有返回值,也没有错误,需要,就是作为特殊功能的返回.eg:重置客户端的EOS
+// 如果表示为空的返回值，就需要一个接受的值，但是没有内定的接受。Error是固定的，所以用这个不是错误的错误表示没有返回值
+const None T = 0
 
 // client
 const (
@@ -13,6 +15,7 @@ const (
 	ClientNotFound         T = 404 //找不到
 	ClientMethodNotAllowed T = 405 //方法禁用
 	ClientCallError        T = 406 //方法禁用
+	ClientReturnInvalid    T = 407 //返回类型错误
 	ClientTooManyRequests  T = 429 //请求过多
 	ClientSendChanExhaust  T = 497 //请求队列已经耗尽
 	ClientCanceled         T = 498 //请求取消

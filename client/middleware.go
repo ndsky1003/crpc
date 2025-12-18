@@ -42,9 +42,9 @@ type Context struct {
 	// --- 内部状态 ---
 	handlers HandlersChain
 	index    int8
-	//NOTE:避免池化，将这个控制权移交到Call上面，共用call的声明周期，
-	//又要保证，这个回调里没有使用Context的代码，因为Context大概率已经放回池子了。
-	//这是用户调用了的，没法保证。
+	//NOTE:避免池化，将这个hook控制权移交到Call上面，共用call的声明周期，是行不通的
+	//很那保证这个hooks，里没有使用Context的代码，因为Context大概率已经放回池子了。
+	//这是用户写的，所以这里直接放弃池化Context，没法保证。
 	hooks []responseHook
 }
 
@@ -67,6 +67,7 @@ func CacheMiddleware(c *Context) {
     }
 }
 */
+//NOTE: 还有这种，调用本地，就可以直接返回了,不需要继续往下走，所以Abort不一定就是有错
 func (c *Context) Abort() {
 	c.index = int8(math.MaxInt8 / 2)
 }

@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -109,7 +108,7 @@ func (c *Client) executeChain(ctx context.Context, callType headertype.T, servic
 	mCtx.handlers = c.handlers
 
 	if len(c.handlers) == 0 {
-		mCtx.SetError(errors.New(errors.ClientInternal, "client is closed or not initialized"))
+		mCtx.SetError(errors.New(errors.ClientInternal, "middware is empty"))
 	}
 
 	mCtx.Next()
@@ -137,58 +136,60 @@ func (c *Client) executeChain(ctx context.Context, callType headertype.T, servic
 }
 
 // 广播消费循环
+// 这里的回调最后一个参数一定是false
 func (c *Client) dispatchBroadcast(call *Call, res *broadcastResult) bool {
 	if call.BroadcastResNewFunc == nil || call.BroadcastResCallBack == nil {
 		return false
 	}
-
 	var reply any
 	var resErr error
 	if res.fromLocal { // 本地调用优化，直接有对象
 		if res.code.IsOK() {
 			reply = res.res
 		} else {
-			var ok bool
-			if resErr, ok = res.res.(error); !ok {
-				resErr = errors.New(errors.ClientCallError, fmt.Sprintf("err:%v", res.res))
+			if res.res != nil { //空返回,这里就是nil
+				if err, ok := res.res.(error); ok {
+					if er, ok1 := err.(*errors.Error); ok1 {
+						resErr = er
+					} else {
+						resErr = errors.Newf(errors.ClientCallError, "err:%+v", er)
+					}
+				} else {
+					resErr = errors.Newf(errors.ClientReturnInvalid, "invalid return ,ret:%+v is not error", res)
+				}
 			}
 		}
-
-	} else if res.code.IsOK() {
-		reply = call.BroadcastResNewFunc()
-		if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
-			tmpErr := errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
-			if call.ctx != nil {
-				call.ctx.invokeHooks(nil, tmpErr)
+	} else { //remote
+		if res.code.IsOK() {
+			reply = call.BroadcastResNewFunc()
+			if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
+				tmpErr := errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
+				if call.ctx != nil {
+					call.ctx.invokeHooks(nil, tmpErr)
+				}
+				call.BroadcastResCallBack(nil, tmpErr, false)
+				return false
 			}
-			call.BroadcastResCallBack(nil, tmpErr, res.IsEOS)
-			return false
-		}
-	} else {
-		tmpErr := &errors.Error{}
-		if err := coder.Unmarshal(coder.Msgp, res.rawBody, tmpErr); err != nil {
-			tmpErr := errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
-			if call.ctx != nil {
-				call.ctx.invokeHooks(nil, tmpErr)
+		} else {
+			tmpErr := &errors.Error{}
+			if err := coder.Unmarshal(res.resCoderT, res.rawBody, tmpErr); err != nil {
+				tmpErr := errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
+				if call.ctx != nil {
+					call.ctx.invokeHooks(nil, tmpErr)
+				}
+				call.BroadcastResCallBack(nil, tmpErr, false)
+				return false
 			}
-			call.BroadcastResCallBack(nil, tmpErr, res.IsEOS)
-			return false
-		}
-		if tmpErr.Code != errors.None {
-			resErr = tmpErr
+			if tmpErr.Code != errors.None {
+				resErr = tmpErr
+			}
 		}
 	}
 
 	if call.ctx != nil {
 		call.ctx.invokeHooks(reply, resErr)
 	}
-	// 执行用户回调
-	cont := call.BroadcastResCallBack(reply, resErr, res.IsEOS)
-	// 如果是 EOS，框架层强制停止，不管用户返回什么
-	if res.IsEOS {
-		return false
-	}
-	return cont
+	return call.BroadcastResCallBack(reply, resErr, false)
 }
 
 func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
@@ -210,8 +211,15 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 					if !ok {
 						return
 					}
+					call.fixStop(res)
 					// 处理残留消息,也就是最后一条消息无法确定select选中上面，还是下面
 					if !c.dispatchBroadcast(call, res) {
+						return
+					}
+					if call.localStop.Load() && call.normalStop.Load() {
+						if f := call.BroadcastResCallBack; f != nil {
+							f(nil, nil, true)
+						}
 						return
 					}
 				default:
@@ -220,12 +228,6 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 				}
 			}
 		TIMEOUT_EXIT:
-			if call.normalStop.Load() {
-				if f := call.BroadcastResCallBack; f != nil {
-					f(nil, nil, true)
-				}
-				return
-			}
 			// 【关键步骤 B】：补发超时通知
 			// 既然走到这里，说明还没遇到 EOS 就被掐断了。
 			// 我们需要人工合成一个 (err=Timeout, eos=true) 的回调。
@@ -243,7 +245,14 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 			if !ok {
 				return
 			}
+			call.fixStop(res)
 			if !c.dispatchBroadcast(call, res) {
+				return
+			}
+			if call.localStop.Load() && call.normalStop.Load() {
+				if f := call.BroadcastResCallBack; f != nil {
+					f(nil, nil, true)
+				}
 				return
 			}
 		}

@@ -2,15 +2,17 @@ package client
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 
 	"github.com/ndsky1003/crpc/v3/coder"
+	"github.com/ndsky1003/crpc/v3/protocol/errors"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headercode"
 )
 
 type broadcastResult struct {
 	rawBody   []byte       // 原始数据
-	res       any          // 已经解码的对象（来自本地优化）
+	res       any          // 已经解码的对象（来自本地优化）,可以是返回值，也可以是错误，通过code判断
 	resCoderT coder.T      // 编码类型
 	code      headercode.T // 是否成功
 	IsEOS     bool         // 是否是结束标志
@@ -26,12 +28,15 @@ type Call struct {
 	ctx *Context
 
 	//broadcast 相关字段 start
-	BroadcastResNewFunc  func() any                              // 用于广播调用时创建返回值对象
-	BroadcastResCallBack func(ret any, err error, eos bool) bool // 返回true表示继续广播,返回false表示停止广播
+	BroadcastResNewFunc func() any // 用于广播调用时创建返回值对象
+	// 返回true表示继续广播,返回false表示停止广播,EOS只是表示不再有数据,比如超时了，err也存在，eos为true
+	// 有可能ret == nil，err ==nil eos == false ,比如广播的无任何返回值那种
+	BroadcastResCallBack func(ret any, err error, eos bool) bool
 	broadcastCh          chan *broadcastResult
 	subCtx               context.Context
 	subCancel            context.CancelFunc
 	normalStop           atomic.Bool //表示是否收到过EOS
+	localStop            atomic.Bool //表示是否收到过EOS
 	//broadcast 相关字段 end
 
 	cleanup func()
@@ -68,5 +73,28 @@ func (this *Call) done() {
 	select {
 	case this.Done <- this:
 	default:
+	}
+}
+
+func (c *Call) fixStop(res *broadcastResult) {
+	if res.fromLocal {
+		c.localStop.Store(true)
+	}
+	if res.IsEOS {
+		c.normalStop.Store(true)
+	}
+}
+
+// trySendBroadcastResult 尝试发送广播结果，如果通道满则丢弃，防止阻塞
+func (c *Call) trySendBroadcastResult(res *broadcastResult) {
+	select {
+	case c.broadcastCh <- res:
+	case <-c.subCtx.Done():
+		err := c.subCtx.Err()
+		slog.Error("subCtx Cancel", "err", err, "res", res)
+	default:
+		c.fixStop(res)
+		err := errors.New(errors.ClientInternal, "广播通道满，丢弃消息")
+		slog.Error("broadcastCh exhaust", "err", err, "res", res)
 	}
 }
