@@ -71,20 +71,12 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 			// --- 本地调用优化: 直接使用对象，避免 reflect.New + Set ---
 			val := reflect.ValueOf(metaData)
 
-			// 适配类型
-			if val.Type().AssignableTo(info.metaType) {
-				metaVal = val
-			} else if val.Kind() == reflect.Pointer && val.Elem().Type().AssignableTo(info.metaType) {
-				// 想要值，给了指针 -> 解引用
-				metaVal = val.Elem()
-			} else if val.Kind() != reflect.Pointer && reflect.PointerTo(val.Type()).AssignableTo(info.metaType) {
-				// 想要指针，给了值 -> 创建指针
-				newPtr := reflect.New(val.Type())
-				newPtr.Elem().Set(val)
-				metaVal = newPtr
-			} else {
-				return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("local call meta type mismatch. want: %v, got: %v", info.metaType, val.Type()))
+			// 使用公共函数适配类型
+			adaptedVal, err := adaptValueForType(val, info.metaType)
+			if err != nil {
+				return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("local call meta type mismatch: %v", err))
 			}
+			metaVal = adaptedVal
 		} else {
 			// --- 远程调用: 走反序列化 ---
 			isPtr := info.metaType.Kind() == reflect.Pointer
@@ -123,20 +115,12 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 			// --- 本地调用优化 ---
 			val := reflect.ValueOf(bodyData)
 
-			// 适配类型
-			if val.Type().AssignableTo(info.reqType) {
-				reqVal = val
-			} else if val.Kind() == reflect.Pointer && val.Elem().Type().AssignableTo(info.reqType) {
-				// 想要值，给了指针 -> 解引用
-				reqVal = val.Elem()
-			} else if val.Kind() != reflect.Pointer && reflect.PointerTo(val.Type()).AssignableTo(info.reqType) {
-				// 想要指针，给了值 -> 创建指针
-				newPtr := reflect.New(val.Type())
-				newPtr.Elem().Set(val)
-				reqVal = newPtr
-			} else {
-				return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("local call req type mismatch. want: %v, got: %v", info.reqType, val.Type()))
+			// 使用公共函数适配类型
+			adaptedVal, err := adaptValueForType(val, info.reqType)
+			if err != nil {
+				return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("local call req type mismatch: %v", err))
 			}
+			reqVal = adaptedVal
 
 		} else {
 			// --- 远程调用 ---
@@ -181,6 +165,27 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 	}
 
 	return res, err
+}
+
+// adaptValueForType 适配值到目标类型，减少重复代码
+func adaptValueForType(val reflect.Value, targetType reflect.Type) (reflect.Value, error) {
+	if val.Type().AssignableTo(targetType) {
+		return val, nil
+	}
+
+	if val.Kind() == reflect.Pointer && val.Elem().Type().AssignableTo(targetType) {
+		// 想要值，给了指针 -> 解引用
+		return val.Elem(), nil
+	}
+
+	if val.Kind() != reflect.Pointer && reflect.PointerTo(val.Type()).AssignableTo(targetType) {
+		// 想要指针，给了值 -> 创建指针
+		newPtr := reflect.New(val.Type())
+		newPtr.Elem().Set(val)
+		return newPtr, nil
+	}
+
+	return reflect.Value{}, fmt.Errorf("type mismatch: cannot assign %v to %v", val.Type(), targetType)
 }
 
 func (c *Client) registerStructMethods(serviceName string, rcvrVal reflect.Value) error {

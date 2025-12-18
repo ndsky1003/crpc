@@ -345,33 +345,78 @@ func varintStrSize(s string) int {
 	return uvarintSize(uint64(len(s))) + len(s)
 }
 
-func readString(b []byte) (string, int, error) {
-	l, n := binary.Uvarint(b)
-	if n <= 0 {
-		err := errors.New("invalid varint len") // defer 会捕获
-		return "", 0, err
-	}
-	if uint64(len(b[n:])) < l {
-		err := errors.New("buffer too short for string") // defer 会捕获
-		return "", 0, err
-	}
-	if l > MaxStringLen {
-		err := errors.New("string too long") // defer 会捕获
-		return "", 0, err
-	}
-	return string(b[n : n+int(l)]), n + int(l), nil
-}
-
-func writeString(b []byte, s string) int {
-	n := binary.PutUvarint(b, uint64(len(s)))
-	copy(b[n:], s)
-	return n + len(s)
-}
-
 func (h *Header) Clone() *Header {
 	if h == nil {
 		return nil
 	}
 	newH := *h
 	return &newH
+}
+
+func readString(b []byte) (string, int, error) {
+	if len(b) == 0 {
+		return "", 0, errors.New("empty buffer")
+	}
+
+	l, n := binary.Uvarint(b[0:])
+	if n <= 0 {
+		err := errors.New("invalid varint len") // defer 会捕获
+		return "", 0, err
+	}
+
+	// 修复：检查长度是否会溢出
+	if int(l) < 0 || uint64(int(l)) != l {
+		err := errors.New("string length overflow")
+		return "", 0, err
+	}
+
+	if uint64(len(b[n:])) < l {
+		err := errors.New("buffer too short for string") // defer 会捕获
+		return "", 0, err
+	}
+	if l > uint64(MaxStringLen) {
+		err := errors.New("string too long") // defer 会捕获
+		return "", 0, err
+	}
+
+	// 修复：确保不会越界
+	if n+int(l) > len(b) {
+		err := errors.New("buffer overflow")
+		return "", 0, err
+	}
+
+	return string(b[n : n+int(l)]), n + int(l), nil
+}
+
+// 修复：添加边界检查
+func writeString(b []byte, s string) (int, error) {
+	// 检查字符串长度
+	if len(s) > MaxStringLen {
+		return 0, errors.New("string too long")
+	}
+
+	// 计算需要的空间
+	// 0 的 varint 编码需要 1 字节，所以 varint 最多需要 binary.MaxVarintLen64 字节
+	maxVarLen := binary.MaxVarintLen64
+	if len(s) == 0 {
+		maxVarLen = 1 // 空字符串的长度编码只需要1字节
+	}
+	varLenSize := binary.PutUvarint(make([]byte, maxVarLen), uint64(len(s)))
+	totalLen := varLenSize + len(s)
+
+	// 检查缓冲区大小
+	if totalLen > len(b) {
+		return 0, errors.New("buffer too small")
+	}
+
+	n := binary.PutUvarint(b, uint64(len(s)))
+
+	// 修复：确保不会越界
+	if n+len(s) > len(b) {
+		return 0, errors.New("buffer overflow")
+	}
+
+	// 安全的拷贝
+	copy(b[n:n+len(s)], s)
+	return n + len(s), nil
 }

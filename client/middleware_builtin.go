@@ -204,7 +204,16 @@ func MwLocal(c *Client) HandlerFunc {
 						}
 						destElem := destVal.Elem()
 						if destElem.CanSet() {
-							destElem.Set(srcVal)
+							// 检查类型兼容性，避免panic
+							if !srcVal.Type().AssignableTo(destElem.Type()) {
+								if srcVal.Type().ConvertibleTo(destElem.Type()) {
+									destElem.Set(srcVal.Convert(destElem.Type()))
+								} else {
+									call.Error = fmt.Errorf("response type mismatch: cannot assign %v to %v", srcVal.Type(), destElem.Type())
+								}
+							} else {
+								destElem.Set(srcVal)
+							}
 						}
 					}
 				}
