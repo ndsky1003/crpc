@@ -17,8 +17,8 @@ import (
 	"github.com/ndsky1003/crpc/v3/protocol/header/headercode"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headerflags"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
-	"github.com/ndsky1003/net/conn"
-	"github.com/ndsky1003/net/server"
+	"github.com/ndsky1003/net/v2/conn"
+	"github.com/ndsky1003/net/v2/server"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -231,7 +231,7 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 			// 预分配切片以提高性能，最大长度为 allTargets
 			realTargets = make([]*Session, 0, len(allTargets))
 			for _, t := range allTargets {
-				if excludeSelf && t.ID() == sid {
+				if excludeSelf && t.Session.ID() == sid {
 					continue
 				}
 				realTargets = append(realTargets, t)
@@ -295,16 +295,20 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 	}
 
 	var target *Session
+	var err error
 	if key := h.HashKey; key != "" {
-		target = group.SelectByKey(key)
+		target, err = group.SelectByKey(key)
 	} else {
-		target = group.Select()
+		target, err = group.Select()
+	}
+	if err != nil {
+		return errors.New(errors.ServerInternal, "no available service instance")
 	}
 
 	if target == nil {
 		return errors.New(errors.ServerDeadlineExceeded, "no available service instance")
 	}
-	return s.forward(target, h, meta, body, timeout)
+	return s.forward(target.Session, h, meta, body, timeout)
 }
 
 func (s *server_mgr) handleRes(_ server.Session, h *header.Header, meta, body []byte) error {
@@ -356,7 +360,13 @@ func (s *server_mgr) handleVerify(sess server.Session, body []byte) error {
 		}
 	}
 	// 获取或创建 ServiceGroup
-	val, _ := s.services.LoadOrStore(req.Name, NewServiceGroup(req.Name, *s.opt.GroupReplicas))
+	g, err := NewServiceGroup(req.Name, *s.opt.GroupReplicas)
+	if err != nil {
+		//TODO: 这里需要从头理解
+		return errors.Newf(errors.ServerInternal, "create service group failed: %v", err)
+	}
+
+	val, _ := s.services.LoadOrStore(req.Name, g)
 	group := val.(*ServiceGroup)
 
 	group.Add(&Session{

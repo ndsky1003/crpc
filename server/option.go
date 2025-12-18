@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/ndsky1003/crpc/v3/comm/ut"
-	"github.com/ndsky1003/net/server"
+	"github.com/ndsky1003/net/v2/server"
 )
 
 func Options() *Option {

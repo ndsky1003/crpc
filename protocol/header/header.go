@@ -191,14 +191,35 @@ func (r *Header) Marshal() ([]byte, error) {
 		idx += 16
 	}
 
-	idx += writeString(header[idx:], r.ToService)
+	size, err := writeString(header[idx:], r.ToService)
+	if err != nil {
+		return nil, err
+	}
+	idx += size
 
-	idx += writeString(header[idx:], r.Module)
+	size, err = writeString(header[idx:], r.Module)
+	if err != nil {
+		return nil, err
+	}
+	idx += size
 
-	idx += writeString(header[idx:], r.Method)
+	size, err = writeString(header[idx:], r.Method)
+	if err != nil {
+		return nil, err
+	}
+	idx += size
 
-	idx += writeString(header[idx:], r.TraceID)
-	idx += writeString(header[idx:], r.HashKey)
+	size, err = writeString(header[idx:], r.TraceID)
+	if err != nil {
+		return nil, err
+	}
+	idx += size
+
+	size, err = writeString(header[idx:], r.HashKey)
+	if err != nil {
+		return nil, err
+	}
+	idx += size
 
 	idx += binary.PutUvarint(header[idx:], r.Deadline)
 

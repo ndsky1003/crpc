@@ -6,7 +6,7 @@ import (
 	"math"
 
 	"github.com/ndsky1003/crpc/v3/protocol/header"
-	"github.com/ndsky1003/net/server"
+	"github.com/ndsky1003/net/v2/server"
 )
 
 type HandlerFunc func(c *Context)

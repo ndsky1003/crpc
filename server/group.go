@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ndsky1003/net/server"
+	"github.com/ndsky1003/net/v2/server"
 )
 
 var (
@@ -491,4 +491,3 @@ func (sg *ServiceGroup) SessionCount() int {
 	defer sg.RUnlock()
 	return len(sg.Sessions)
 }
-

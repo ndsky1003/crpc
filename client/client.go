@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ndsky1003/crpc/v3/buffer/netpool"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/comm/ut"
 	"github.com/ndsky1003/crpc/v3/compressor"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
-	"github.com/ndsky1003/net/client"
+	"github.com/ndsky1003/net/v2/client"
+	"github.com/ndsky1003/net/v2/conn"
 )
 
 type Client struct {
@@ -34,7 +36,7 @@ func New(ctx context.Context, name string, addr string, opts ...*Option) (c *Cli
 	opt := Options().
 		SetWeight(ut.GetEnvInt("CRPC_WEIGHT", 10)).
 		SetBroadcastChanCap(ut.GetEnvInt("CRPC_BROADCAST_CAP", 64)).
-		SetSecret(ut.GetEnv("CRPC_SECRET", "8620506fd4781174ec05fcacf816a12e")).
+		SetSecret(ut.GetEnv("CRPC_SECRET", "")).
 		SetVerifyJwtExpire(ut.GetEnvDuration("CRPC_JWT_EXPIRE", 5*time.Second)).
 		SetDebug(ut.GetEnvBool("CRPC_DEBUG", false)).
 		SetTimeout(10 * time.Second).
@@ -42,7 +44,13 @@ func New(ctx context.Context, name string, addr string, opts ...*Option) (c *Cli
 		SetReqCoderT(coder.JSON).
 		SetResCoderT(coder.JSON).
 		SetCompressT(compressor.Raw).
-		Merge(opts...)
+		WithConn(func(o *client.Option) {
+			o.WithConn(func(oo *conn.Option) {
+				oo.GenBufFn = func() []byte {
+					return netpool.Get()
+				}
+			})
+		}).Merge(opts...)
 
 	if name == "" {
 		return nil, errors.New(errors.ClientInvalidArgs, "service name is required")

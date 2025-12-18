@@ -7,7 +7,7 @@ import (
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/comm/ut"
 	"github.com/ndsky1003/crpc/v3/compressor"
-	"github.com/ndsky1003/net/client"
+	"github.com/ndsky1003/net/v2/client"
 )
 
 func Options() *Option {

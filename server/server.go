@@ -5,8 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ndsky1003/crpc/v3/buffer/netpool"
 	"github.com/ndsky1003/crpc/v3/comm/ut"
-	"github.com/ndsky1003/net/server"
+	"github.com/ndsky1003/net/v2/conn"
+	"github.com/ndsky1003/net/v2/server"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -22,6 +24,13 @@ func New(ctx context.Context, opts ...*Option) (*Server, error) {
 		SetSendTimeout(30 * time.Second).
 		SetBroadcastCounterExpiration(10 * time.Second).
 		SetWorkerSize(5000).
+		WithConn(func(o *server.Option) {
+			o.WithConn(func(oo *conn.Option) {
+				oo.GenBufFn = func() []byte {
+					return netpool.Get()
+				}
+			})
+		}).
 		Merge(opts...)
 	if *opt.Secret == "" {
 		return nil, errors.New("CRPC_SECRET environment variable is required for security")

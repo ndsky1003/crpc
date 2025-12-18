@@ -15,7 +15,7 @@ import (
 	"github.com/ndsky1003/crpc/v3/protocol/header/headercode"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headerflags"
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
-	"github.com/ndsky1003/net/conn"
+	"github.com/ndsky1003/net/v2/conn"
 )
 
 func (c *Client) onDisconnected(err error) {

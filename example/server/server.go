@@ -9,6 +9,7 @@ import (
 
 func main() {
 	fmt.Println("start")
-	server.New(context.Background()).Listen(":8080")
+	s, _ := server.New(context.Background())
+	s.Listen(":8080")
 	fmt.Println("dd")
 }

@@ -47,6 +47,6 @@ func ServerOptions() *ServerOption {
 	return server.Options()
 }
 
-func NewServer(ctx context.Context, opts ...*server.Option) *Server {
+func NewServer(ctx context.Context, opts ...*server.Option) (*Server, error) {
 	return server.New(ctx, opts...)
 }
