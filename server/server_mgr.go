@@ -380,7 +380,9 @@ func (s *server_mgr) replyVerify(sess server.Session, reqH *header.Header, verif
 	reqH.Code = headercode.OK
 
 	if verifyErr != nil {
-		resp.Message = verifyErr.Error()
+		slog.Error("Authentication failed", "err", verifyErr, "sid", sess.ID())
+		// 返回通用错误信息，避免泄露JWT验证的敏感信息
+		resp.Message = "Authentication failed"
 		reqH.Code = headercode.Failed
 	} else {
 		resp.UUID = sess.ID()

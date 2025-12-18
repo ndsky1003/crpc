@@ -68,8 +68,8 @@ type ServiceGroup struct {
 	randomPool *sync.Pool
 
 	// 监控指标
-	selectCount   atomic.Uint64 // 选择操作计数
-	rebuildCount  atomic.Uint64 // 重建哈希环计数
+	selectCount    atomic.Uint64 // 选择操作计数
+	rebuildCount   atomic.Uint64 // 重建哈希环计数
 	collisionCount atomic.Uint64 // 哈希碰撞计数
 }
 
@@ -245,7 +245,13 @@ func (sg *ServiceGroup) buildHashRing(sessions []*Session, replicas int) *consis
 	newSessionMap := make(map[uint32]*Session, actualCapacity)
 
 	// 获取随机数生成器
-	random := sg.randomPool.Get().(*rand.Rand)
+	randomObj := sg.randomPool.Get()
+	random, ok := randomObj.(*rand.Rand)
+	if !ok {
+		// 如果类型不匹配，创建一个新的随机数生成器
+		slog.Error("Invalid type in randomPool, creating new rand.Rand")
+		random = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
 	defer sg.randomPool.Put(random)
 
 	// 2. 为每个节点生成虚拟节点
@@ -352,7 +358,12 @@ func (sg *ServiceGroup) Select() (*Session, error) {
 	}
 
 	// 获取随机数生成器
-	random := sg.randomPool.Get().(*rand.Rand)
+	randomObj := sg.randomPool.Get()
+	random, ok := randomObj.(*rand.Rand)
+	if !ok {
+		slog.Error("Invalid type in randomPool, creating new rand.Rand")
+		random = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
 	defer sg.randomPool.Put(random)
 
 	// 加权随机：生成 [0, TotalWeight) 范围内的随机数
@@ -480,3 +491,4 @@ func (sg *ServiceGroup) SessionCount() int {
 	defer sg.RUnlock()
 	return len(sg.Sessions)
 }
+
