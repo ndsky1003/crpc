@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/ndsky1003/crpc/v3/buffer/netpool"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
@@ -28,7 +30,7 @@ func (c *Client) onDisconnected(err error) {
 		c.pending.Delete(seq)
 		return true // 继续遍历下一个
 	})
-	log.Printf("Client %s disconnected, cleared all pending calls: %v", c.Name, err)
+	slog.Info("onDisconnected, cleared all pending calls", "name", c.Name, "err", err)
 }
 
 // onconnect
@@ -101,7 +103,6 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	return errors.Newf(errors.ClientInternal, "verification failed: %s", resp.Message)
 }
 
-// HandleMsg 实现 net.Handler 接口
 func (c *Client) HandleMsg(data []byte) error {
 	h, meta, body, err := protocol.Unpack(data)
 	if err != nil {
@@ -112,31 +113,27 @@ func (c *Client) HandleMsg(data []byte) error {
 		ctx = c.opt.WithTraceID(ctx, h.TraceID)
 	}
 
-	bodyCopy := make([]byte, len(body))
-	copy(bodyCopy, body)
-	switch {
-	case h.Type.IsReq():
-		metaCopy := make([]byte, len(meta))
-		copy(metaCopy, meta)
-		go c.handleReq(ctx, h, metaCopy, bodyCopy)
-	case h.Type.IsRes():
-		if h.Flags.IsBroadcast() {
-			//轻操作（仅转发），怕乱序（EOS竞态），所以同步
-			if err := c.handleRes(ctx, h, bodyCopy); err != nil {
+	go func() {
+		defer netpool.Release(data)
+		defer h.Release()
+		switch {
+		case h.Type.IsReq():
+			c.handleReq(ctx, h, meta, body)
+		case h.Type.IsRes():
+			//TODO: 这里广播的话得,有问题,后发的EOS可能先处理 轻操作（仅转发），怕乱序（EOS竞态），所以同步
+			// 之前广播这里是同步的
+			if err := c.handleRes(ctx, h, body); err != nil {
 				log.Println("handleRes :", err)
 			}
-		} else {
-			go c.handleRes(ctx, h, bodyCopy)
+		default:
+			slog.Error("unknown header type", "type", h.Type)
 		}
-	default:
-		h.Release()
-		return fmt.Errorf("unknown header type: %d", h.Type)
-	}
+	}()
+
 	return nil
 }
 
 func (c *Client) handleReq(ctx context.Context, h *header.Header, meta, body []byte) error {
-	defer h.Release()
 	if h.Deadline > 0 {
 		deadlineTime := time.UnixMicro(int64(h.Deadline))
 		var cancel context.CancelFunc
@@ -163,7 +160,6 @@ func (c *Client) invoke_local_func(ctx context.Context, mod, method string, meta
 }
 
 func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) error {
-	defer h.Release()
 	seq := h.Seq
 	isBroadcast := h.Flags.IsBroadcast()
 
