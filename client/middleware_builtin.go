@@ -163,7 +163,8 @@ func MwLocal(c *Client) HandlerFunc {
 					}
 				}
 			}()
-			res, err := c.invoke_local_func(ctx.Ctx, ctx.Module, ctx.Func, *ctx.MergedOpt.MetaCoderT, *ctx.MergedOpt.ReqCoderT, metaObj, bodyObj)
+			// 本地调用，metaObj 和 bodyObj 都是原始对象
+			res, err := c.invoke_local_func(ctx.Ctx, ctx.Module, ctx.Func, *ctx.MergedOpt.MetaCoderT, *ctx.MergedOpt.ReqCoderT, metaObj, bodyObj, false)
 			if err != nil {
 				if e, ok := err.(*errors.Error); ok {
 					err = e

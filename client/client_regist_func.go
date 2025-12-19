@@ -39,13 +39,13 @@ type method_meta struct {
 }
 
 // HandleMsg 动态分发
-func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any) (any, error) {
+func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any, fromNetwork bool) (any, error) {
 	info, err := s.getMethodInfo(method)
 	if err != nil {
 		return nil, err
 	}
 
-	args, err := s.buildArgs(ctx, info, metaCoderT, reqCoderT, metaData, bodyData)
+	args, err := s.buildArgs(ctx, info, metaCoderT, reqCoderT, metaData, bodyData, fromNetwork)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ func (s *dynamic_service) getMethodInfo(method string) (*method_meta, error) {
 }
 
 // buildArgs 构建调用参数
-func (s *dynamic_service) buildArgs(ctx context.Context, info *method_meta, metaCoderT, reqCoderT coder.T, metaData, bodyData any) ([]reflect.Value, error) {
+func (s *dynamic_service) buildArgs(ctx context.Context, info *method_meta, metaCoderT, reqCoderT coder.T, metaData, bodyData any, fromNetwork bool) ([]reflect.Value, error) {
 	var args []reflect.Value
 
 	// 1. Arg: Context
@@ -77,10 +77,11 @@ func (s *dynamic_service) buildArgs(ctx context.Context, info *method_meta, meta
 	// 2. Arg: Meta
 	if info.hasMeta {
 		processor := &paramProcessor{
-			data:      metaData,
-			target:    info.metaType,
-			coderT:    metaCoderT,
-			paramName: "meta",
+			data:        metaData,
+			target:      info.metaType,
+			coderT:      metaCoderT,
+			paramName:   "meta",
+			fromNetwork: fromNetwork,
 		}
 		metaVal, err := processor.process()
 		if err != nil {
@@ -92,10 +93,11 @@ func (s *dynamic_service) buildArgs(ctx context.Context, info *method_meta, meta
 	// 3. Arg: Request
 	if info.hasReq {
 		processor := &paramProcessor{
-			data:      bodyData,
-			target:    info.reqType,
-			coderT:    reqCoderT,
-			paramName: "req",
+			data:        bodyData,
+			target:      info.reqType,
+			coderT:      reqCoderT,
+			paramName:   "req",
+			fromNetwork: fromNetwork,
 		}
 		reqVal, err := processor.process()
 		if err != nil {
@@ -162,21 +164,15 @@ type paramProcessor struct {
 	target    reflect.Type
 	coderT    coder.T
 	paramName string
+	fromNetwork bool  // 标识数据是否来自网络
 }
 
 func (p *paramProcessor) process() (reflect.Value, error) {
-	// 检查是否为有效的本地对象 (非 nil 且 非 []byte)
-	isLocalObj := false
-	if p.data != nil {
-		if _, isBytes := p.data.([]byte); !isBytes {
-			isLocalObj = true
-		}
+	// 根据数据来源判断调用方式
+	if p.fromNetwork {
+		return p.processRemoteCall()
 	}
-
-	if isLocalObj {
-		return p.processLocalCall()
-	}
-	return p.processRemoteCall()
+	return p.processLocalCall()
 }
 
 func (p *paramProcessor) processLocalCall() (reflect.Value, error) {

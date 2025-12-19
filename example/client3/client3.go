@@ -20,6 +20,7 @@ type MyStructService struct{}
 // -------------------------------------------------------
 // 场景 1: 标准全量 (Ctx, Meta, Req) -> (Res, error)
 // -------------------------------------------------------
+// @crpc:CallType:Call,Send,Go
 func (s *MyStructService) Full(ctx context.Context, meta *dto.Meta, req *dto.Req) (*dto.Res, error) {
 	fmt.Printf("[Struct] Full Called: Meta=%v, Req=%v\n", meta, req)
 	return &dto.Res{Msg: "OK from Struct.Full"}, nil
@@ -90,6 +91,73 @@ func (s *MyStructService) Empty() {
 // 仅 Context: (Ctx) -> ()
 func (s *MyStructService) CtxOnly(ctx context.Context) {
 	fmt.Println("[Struct] CtxOnly Called")
+}
+
+// -------------------------------------------------------
+// 遗漏的方法签名
+// -------------------------------------------------------
+
+// (Ctx) -> (Res, error)
+func (s *MyStructService) CtxOnlyResErr(ctx context.Context) (*dto.Res, error) {
+	fmt.Println("[Struct] CtxOnlyResErr Called")
+	return &dto.Res{Msg: "OK from Struct.CtxOnlyResErr"}, nil
+}
+
+// (Ctx) -> (Res)
+func (s *MyStructService) CtxOnlyRes(ctx context.Context) *dto.Res {
+	fmt.Println("[Struct] CtxOnlyRes Called")
+	return &dto.Res{Msg: "OK from Struct.CtxOnlyRes"}
+}
+
+// (Ctx) -> (error)
+func (s *MyStructService) CtxOnlyErr(ctx context.Context) error {
+	fmt.Println("[Struct] CtxOnlyErr Called")
+	return nil
+}
+
+// () -> (Res, error)
+func (s *MyStructService) NoParamsResErr() (*dto.Res, error) {
+	fmt.Println("[Struct] NoParamsResErr Called")
+	return &dto.Res{Msg: "OK from Struct.NoParamsResErr"}, nil
+}
+
+// () -> (Res)
+func (s *MyStructService) NoParamsRes() *dto.Res {
+	fmt.Println("[Struct] NoParamsRes Called")
+	return &dto.Res{Msg: "OK from Struct.NoParamsRes"}
+}
+
+// () -> (error)
+func (s *MyStructService) NoParamsErr() error {
+	fmt.Println("[Struct] NoParamsErr Called")
+	return nil
+}
+
+// -------------------------------------------------------
+// (Ctx, Meta, Req) 组合的完整变体
+// -------------------------------------------------------
+
+// (Ctx, Meta, Req) -> (Res, error)
+func (s *MyStructService) CtxMetaReqResErr(ctx context.Context, meta *dto.Meta, req *dto.Req) (*dto.Res, error) {
+	fmt.Printf("[Struct] CtxMetaReqResErr Called: Meta=%v, Req=%v\n", meta, req)
+	return &dto.Res{Msg: "OK from Struct.CtxMetaReqResErr"}, nil
+}
+
+// (Ctx, Meta, Req) -> (Res)
+func (s *MyStructService) CtxMetaReqRes(ctx context.Context, meta *dto.Meta, req *dto.Req) *dto.Res {
+	fmt.Printf("[Struct] CtxMetaReqRes Called: Meta=%v, Req=%v\n", meta, req)
+	return &dto.Res{Msg: "OK from Struct.CtxMetaReqRes"}
+}
+
+// (Ctx, Meta, Req) -> (error)
+func (s *MyStructService) CtxMetaReqErr(ctx context.Context, meta *dto.Meta, req *dto.Req) error {
+	fmt.Printf("[Struct] CtxMetaReqErr Called: Meta=%v, Req=%v\n", meta, req)
+	return nil
+}
+
+// (Ctx, Meta, Req) -> ()
+func (s *MyStructService) CtxMetaReq(ctx context.Context, meta *dto.Meta, req *dto.Req) {
+	fmt.Printf("[Struct] CtxMetaReq Called: Meta=%v, Req=%v\n", meta, req)
 }
 
 // ==========================================

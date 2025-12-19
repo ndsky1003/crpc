@@ -8,6 +8,94 @@ import (
 	"github.com/ndsky1003/crpc/v3/example/dto"
 )
 
+// CtxMetaReq invokes client3.MyService.CtxMetaReq
+func CtxMetaReq(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.Option) error {
+	// Meta 处理 (放入 opts)
+	opts = append(opts, client.Options().SetMeta(meta))
+
+	// Req 处理
+	var reqBody any = req
+
+	// Ctx 处理
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var resPtr any = nil
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.CtxMetaReq", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	// 即使原方法无返回值，生成的 Client 也会返回 error
+	return err
+}
+
+// CtxMetaReqErr invokes client3.MyService.CtxMetaReqErr
+func CtxMetaReqErr(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.Option) error {
+	// Meta 处理 (放入 opts)
+	opts = append(opts, client.Options().SetMeta(meta))
+
+	// Req 处理
+	var reqBody any = req
+
+	// Ctx 处理
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var resPtr any = nil
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.CtxMetaReqErr", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	// 即使原方法无返回值，生成的 Client 也会返回 error
+	return err
+}
+
+// CtxMetaReqRes invokes client3.MyService.CtxMetaReqRes
+func CtxMetaReqRes(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.Option) (*dto.Res, error) {
+	// Meta 处理 (放入 opts)
+	opts = append(opts, client.Options().SetMeta(meta))
+
+	// Req 处理
+	var reqBody any = req
+
+	// Ctx 处理
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var res dto.Res
+	var resPtr any = &res
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.CtxMetaReqRes", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	return &res, err
+}
+
+// CtxMetaReqResErr invokes client3.MyService.CtxMetaReqResErr
+func CtxMetaReqResErr(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.Option) (*dto.Res, error) {
+	// Meta 处理 (放入 opts)
+	opts = append(opts, client.Options().SetMeta(meta))
+
+	// Req 处理
+	var reqBody any = req
+
+	// Ctx 处理
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var res dto.Res
+	var resPtr any = &res
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.CtxMetaReqResErr", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	return &res, err
+}
+
 // CtxOnly invokes client3.MyService.CtxOnly
 func CtxOnly(ctx context.Context, opts ...*client.Option) error {
 	// Meta 处理 (放入 opts)
@@ -27,6 +115,69 @@ func CtxOnly(ctx context.Context, opts ...*client.Option) error {
 	// 3. 处理返回值
 	// 即使原方法无返回值，生成的 Client 也会返回 error
 	return err
+}
+
+// CtxOnlyErr invokes client3.MyService.CtxOnlyErr
+func CtxOnlyErr(ctx context.Context, opts ...*client.Option) error {
+	// Meta 处理 (放入 opts)
+
+	// Req 处理
+	var reqBody any = nil
+
+	// Ctx 处理
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var resPtr any = nil
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.CtxOnlyErr", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	// 即使原方法无返回值，生成的 Client 也会返回 error
+	return err
+}
+
+// CtxOnlyRes invokes client3.MyService.CtxOnlyRes
+func CtxOnlyRes(ctx context.Context, opts ...*client.Option) (*dto.Res, error) {
+	// Meta 处理 (放入 opts)
+
+	// Req 处理
+	var reqBody any = nil
+
+	// Ctx 处理
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var res dto.Res
+	var resPtr any = &res
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.CtxOnlyRes", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	return &res, err
+}
+
+// CtxOnlyResErr invokes client3.MyService.CtxOnlyResErr
+func CtxOnlyResErr(ctx context.Context, opts ...*client.Option) (*dto.Res, error) {
+	// Meta 处理 (放入 opts)
+
+	// Req 处理
+	var reqBody any = nil
+
+	// Ctx 处理
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var res dto.Res
+	var resPtr any = &res
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.CtxOnlyResErr", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	return &res, err
 }
 
 // CtxReqPtr invokes client3.MyService.CtxReqPtr
@@ -137,6 +288,37 @@ func Full(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.Opt
 	return &res, err
 }
 
+// Full_Go invokes client3.MyService.Full
+func Full_Go(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.Option) *client.Call {
+	// Meta 处理 (放入 opts)
+	opts = append(opts, client.Options().SetMeta(meta))
+
+	// Req 处理
+	var reqBody any = req
+
+	// Ctx 处理
+
+	// 2. 根据 CallType 分发调用
+	// Go 模式：异步调用，返回 Call 对象
+	var res dto.Res
+	return Default_lient.Go(ctx, "client3", "MyService.Full", reqBody, &res, opts...)
+}
+
+// Full_Send invokes client3.MyService.Full
+func Full_Send(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.Option) error {
+	// Meta 处理 (放入 opts)
+	opts = append(opts, client.Options().SetMeta(meta))
+
+	// Req 处理
+	var reqBody any = req
+
+	// Ctx 处理
+
+	// 2. 根据 CallType 分发调用
+	// Send 模式：单向发送
+	return Default_lient.Send(ctx, "client3", "MyService.Full", reqBody, opts...)
+}
+
 // MetaReq invokes client3.MyService.MetaReq
 func MetaReq(meta *dto.Meta, req *dto.Req, opts ...*client.Option) (*dto.Res, error) {
 	// Meta 处理 (放入 opts)
@@ -155,6 +337,72 @@ func MetaReq(meta *dto.Meta, req *dto.Req, opts ...*client.Option) (*dto.Res, er
 
 	// 【修正】强制捕获 error
 	err := Default_lient.Call(ctx, "client3", "MyService.MetaReq", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	return &res, err
+}
+
+// NoParamsErr invokes client3.MyService.NoParamsErr
+func NoParamsErr(opts ...*client.Option) error {
+	// Meta 处理 (放入 opts)
+
+	// Req 处理
+	var reqBody any = nil
+
+	// Ctx 处理
+	ctx := context.Background()
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var resPtr any = nil
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.NoParamsErr", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	// 即使原方法无返回值，生成的 Client 也会返回 error
+	return err
+}
+
+// NoParamsRes invokes client3.MyService.NoParamsRes
+func NoParamsRes(opts ...*client.Option) (*dto.Res, error) {
+	// Meta 处理 (放入 opts)
+
+	// Req 处理
+	var reqBody any = nil
+
+	// Ctx 处理
+	ctx := context.Background()
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var res dto.Res
+	var resPtr any = &res
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.NoParamsRes", reqBody, resPtr, opts...)
+
+	// 3. 处理返回值
+	return &res, err
+}
+
+// NoParamsResErr invokes client3.MyService.NoParamsResErr
+func NoParamsResErr(opts ...*client.Option) (*dto.Res, error) {
+	// Meta 处理 (放入 opts)
+
+	// Req 处理
+	var reqBody any = nil
+
+	// Ctx 处理
+	ctx := context.Background()
+
+	// 2. 根据 CallType 分发调用
+	// Call 模式：同步等待
+	var res dto.Res
+	var resPtr any = &res
+
+	// 【修正】强制捕获 error
+	err := Default_lient.Call(ctx, "client3", "MyService.NoParamsResErr", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err

@@ -311,31 +311,35 @@ import (
 
 {{- range .Structs}}
 
-func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any) (any, error) {
+func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any, fromNetwork bool) (any, error) {
 	switch method {
 	{{- range .Methods}}
 	case "{{.Name}}":
 		// 1. 准备 Req
 		{{- if .HasReq}}
 		var req {{TypeClean .ReqType}}
-		
-		if b, ok := bodyData.([]byte); ok {
+
+		if fromNetwork {
 			// 远程调用 (Bytes)
-			if len(b) > 0 {
-				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
-					return nil, err
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if bodyData != nil {
+		} else {
 			// 本地调用 (Object)
-			if v, ok := bodyData.(*{{TypeClean .ReqType}}); ok {
-				if v != nil {
-					req = *v
+			if bodyData != nil {
+				if v, ok := bodyData.(*{{TypeClean .ReqType}}); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.({{TypeClean .ReqType}}); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for {{.Name}} arg: req")
 				}
-			} else if v, ok := bodyData.({{TypeClean .ReqType}}); ok {
-				req = v
-			} else {
-				return nil, errors.New("local call type mismatch for {{.Name}} arg: req")
 			}
 		}
 		{{- end}}
@@ -343,21 +347,27 @@ func (c *{{.Name}}) HandleMsg(ctx context.Context, method string, metaCoderT cod
 		// 2. 准备 Meta
 		{{- if .HasMeta}}
 		var meta {{TypeClean .MetaType}}
-		if b, ok := metaData.([]byte); ok {
-			if len(b) > 0 {
-				if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
-					return nil, err
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := metaData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if metaData != nil {
-			if v, ok := metaData.(*{{TypeClean .MetaType}}); ok {
-				if v != nil {
-					meta = *v
+		} else {
+			// 本地调用 (Object)
+			if metaData != nil {
+				if v, ok := metaData.(*{{TypeClean .MetaType}}); ok {
+					if v != nil {
+						meta = *v
+					}
+				} else if v, ok := metaData.({{TypeClean .MetaType}}); ok {
+					meta = v
+				} else {
+					return nil, errors.New("local call type mismatch for {{.Name}} arg: meta")
 				}
-			} else if v, ok := metaData.({{TypeClean .MetaType}}); ok {
-				meta = v
-			} else {
-				return nil, errors.New("local call type mismatch for {{.Name}} arg: meta")
 			}
 		}
 		{{- end}}

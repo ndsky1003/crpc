@@ -9,49 +9,59 @@ import (
 	"github.com/ndsky1003/crpc/v3/example/dto"
 )
 
-func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any) (any, error) {
+func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any, fromNetwork bool) (any, error) {
 	switch method {
 	case "Full":
 		// 1. 准备 Req
 		var req dto.Req
 
-		if b, ok := bodyData.([]byte); ok {
+		if fromNetwork {
 			// 远程调用 (Bytes)
-			if len(b) > 0 {
-				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
-					return nil, err
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if bodyData != nil {
+		} else {
 			// 本地调用 (Object)
-			if v, ok := bodyData.(*dto.Req); ok {
-				if v != nil {
-					req = *v
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for Full arg: req")
 				}
-			} else if v, ok := bodyData.(dto.Req); ok {
-				req = v
-			} else {
-				return nil, errors.New("local call type mismatch for Full arg: req")
 			}
 		}
 
 		// 2. 准备 Meta
 		var meta dto.Meta
-		if b, ok := metaData.([]byte); ok {
-			if len(b) > 0 {
-				if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
-					return nil, err
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := metaData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if metaData != nil {
-			if v, ok := metaData.(*dto.Meta); ok {
-				if v != nil {
-					meta = *v
+		} else {
+			// 本地调用 (Object)
+			if metaData != nil {
+				if v, ok := metaData.(*dto.Meta); ok {
+					if v != nil {
+						meta = *v
+					}
+				} else if v, ok := metaData.(dto.Meta); ok {
+					meta = v
+				} else {
+					return nil, errors.New("local call type mismatch for Full arg: meta")
 				}
-			} else if v, ok := metaData.(dto.Meta); ok {
-				meta = v
-			} else {
-				return nil, errors.New("local call type mismatch for Full arg: meta")
 			}
 		}
 
@@ -67,23 +77,27 @@ func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCode
 		// 1. 准备 Req
 		var req dto.Req
 
-		if b, ok := bodyData.([]byte); ok {
+		if fromNetwork {
 			// 远程调用 (Bytes)
-			if len(b) > 0 {
-				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
-					return nil, err
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if bodyData != nil {
+		} else {
 			// 本地调用 (Object)
-			if v, ok := bodyData.(*dto.Req); ok {
-				if v != nil {
-					req = *v
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxReqPtr arg: req")
 				}
-			} else if v, ok := bodyData.(dto.Req); ok {
-				req = v
-			} else {
-				return nil, errors.New("local call type mismatch for CtxReqPtr arg: req")
 			}
 		}
 
@@ -101,23 +115,27 @@ func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCode
 		// 1. 准备 Req
 		var req string
 
-		if b, ok := bodyData.([]byte); ok {
+		if fromNetwork {
 			// 远程调用 (Bytes)
-			if len(b) > 0 {
-				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
-					return nil, err
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if bodyData != nil {
+		} else {
 			// 本地调用 (Object)
-			if v, ok := bodyData.(*string); ok {
-				if v != nil {
-					req = *v
+			if bodyData != nil {
+				if v, ok := bodyData.(*string); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(string); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxReqVal arg: req")
 				}
-			} else if v, ok := bodyData.(string); ok {
-				req = v
-			} else {
-				return nil, errors.New("local call type mismatch for CtxReqVal arg: req")
 			}
 		}
 
@@ -135,43 +153,53 @@ func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCode
 		// 1. 准备 Req
 		var req dto.Req
 
-		if b, ok := bodyData.([]byte); ok {
+		if fromNetwork {
 			// 远程调用 (Bytes)
-			if len(b) > 0 {
-				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
-					return nil, err
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if bodyData != nil {
+		} else {
 			// 本地调用 (Object)
-			if v, ok := bodyData.(*dto.Req); ok {
-				if v != nil {
-					req = *v
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for MetaReq arg: req")
 				}
-			} else if v, ok := bodyData.(dto.Req); ok {
-				req = v
-			} else {
-				return nil, errors.New("local call type mismatch for MetaReq arg: req")
 			}
 		}
 
 		// 2. 准备 Meta
 		var meta dto.Meta
-		if b, ok := metaData.([]byte); ok {
-			if len(b) > 0 {
-				if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
-					return nil, err
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := metaData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if metaData != nil {
-			if v, ok := metaData.(*dto.Meta); ok {
-				if v != nil {
-					meta = *v
+		} else {
+			// 本地调用 (Object)
+			if metaData != nil {
+				if v, ok := metaData.(*dto.Meta); ok {
+					if v != nil {
+						meta = *v
+					}
+				} else if v, ok := metaData.(dto.Meta); ok {
+					meta = v
+				} else {
+					return nil, errors.New("local call type mismatch for MetaReq arg: meta")
 				}
-			} else if v, ok := metaData.(dto.Meta); ok {
-				meta = v
-			} else {
-				return nil, errors.New("local call type mismatch for MetaReq arg: meta")
 			}
 		}
 
@@ -187,23 +215,27 @@ func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCode
 		// 1. 准备 Req
 		var req dto.Req
 
-		if b, ok := bodyData.([]byte); ok {
+		if fromNetwork {
 			// 远程调用 (Bytes)
-			if len(b) > 0 {
-				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
-					return nil, err
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if bodyData != nil {
+		} else {
 			// 本地调用 (Object)
-			if v, ok := bodyData.(*dto.Req); ok {
-				if v != nil {
-					req = *v
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for ReqOnly arg: req")
 				}
-			} else if v, ok := bodyData.(dto.Req); ok {
-				req = v
-			} else {
-				return nil, errors.New("local call type mismatch for ReqOnly arg: req")
 			}
 		}
 
@@ -221,23 +253,27 @@ func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCode
 		// 1. 准备 Req
 		var req dto.Req
 
-		if b, ok := bodyData.([]byte); ok {
+		if fromNetwork {
 			// 远程调用 (Bytes)
-			if len(b) > 0 {
-				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
-					return nil, err
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if bodyData != nil {
+		} else {
 			// 本地调用 (Object)
-			if v, ok := bodyData.(*dto.Req); ok {
-				if v != nil {
-					req = *v
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for ResOnly arg: req")
 				}
-			} else if v, ok := bodyData.(dto.Req); ok {
-				req = v
-			} else {
-				return nil, errors.New("local call type mismatch for ResOnly arg: req")
 			}
 		}
 
@@ -252,23 +288,27 @@ func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCode
 		// 1. 准备 Req
 		var req dto.Req
 
-		if b, ok := bodyData.([]byte); ok {
+		if fromNetwork {
 			// 远程调用 (Bytes)
-			if len(b) > 0 {
-				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
-					return nil, err
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if bodyData != nil {
+		} else {
 			// 本地调用 (Object)
-			if v, ok := bodyData.(*dto.Req); ok {
-				if v != nil {
-					req = *v
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for ErrOnly arg: req")
 				}
-			} else if v, ok := bodyData.(dto.Req); ok {
-				req = v
-			} else {
-				return nil, errors.New("local call type mismatch for ErrOnly arg: req")
 			}
 		}
 
@@ -286,23 +326,27 @@ func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCode
 		// 1. 准备 Req
 		var req dto.Req
 
-		if b, ok := bodyData.([]byte); ok {
+		if fromNetwork {
 			// 远程调用 (Bytes)
-			if len(b) > 0 {
-				if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
-					return nil, err
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
 				}
 			}
-		} else if bodyData != nil {
+		} else {
 			// 本地调用 (Object)
-			if v, ok := bodyData.(*dto.Req); ok {
-				if v != nil {
-					req = *v
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for NoReturn arg: req")
 				}
-			} else if v, ok := bodyData.(dto.Req); ok {
-				req = v
-			} else {
-				return nil, errors.New("local call type mismatch for NoReturn arg: req")
 			}
 		}
 
@@ -330,6 +374,320 @@ func (c *MyStructService) HandleMsg(ctx context.Context, method string, metaCode
 
 		// 3. 调用方法
 		c.CtxOnly(ctx)
+
+		// 4. 处理返回值
+		return nil, nil
+	case "CtxOnlyResErr":
+		// 1. 准备 Req
+
+		// 2. 准备 Meta
+
+		// 3. 调用方法
+		res, err := c.CtxOnlyResErr(ctx)
+
+		// 4. 处理返回值
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+	case "CtxOnlyRes":
+		// 1. 准备 Req
+
+		// 2. 准备 Meta
+
+		// 3. 调用方法
+		res := c.CtxOnlyRes(ctx)
+
+		// 4. 处理返回值
+		return res, nil
+	case "CtxOnlyErr":
+		// 1. 准备 Req
+
+		// 2. 准备 Meta
+
+		// 3. 调用方法
+		err := c.CtxOnlyErr(ctx)
+
+		// 4. 处理返回值
+		if err != nil {
+			return nil, err
+		}
+		return nil, nil
+	case "NoParamsResErr":
+		// 1. 准备 Req
+
+		// 2. 准备 Meta
+
+		// 3. 调用方法
+		res, err := c.NoParamsResErr()
+
+		// 4. 处理返回值
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+	case "NoParamsRes":
+		// 1. 准备 Req
+
+		// 2. 准备 Meta
+
+		// 3. 调用方法
+		res := c.NoParamsRes()
+
+		// 4. 处理返回值
+		return res, nil
+	case "NoParamsErr":
+		// 1. 准备 Req
+
+		// 2. 准备 Meta
+
+		// 3. 调用方法
+		err := c.NoParamsErr()
+
+		// 4. 处理返回值
+		if err != nil {
+			return nil, err
+		}
+		return nil, nil
+	case "CtxMetaReqResErr":
+		// 1. 准备 Req
+		var req dto.Req
+
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
+				}
+			}
+		} else {
+			// 本地调用 (Object)
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxMetaReqResErr arg: req")
+				}
+			}
+		}
+
+		// 2. 准备 Meta
+		var meta dto.Meta
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := metaData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
+						return nil, err
+					}
+				}
+			}
+		} else {
+			// 本地调用 (Object)
+			if metaData != nil {
+				if v, ok := metaData.(*dto.Meta); ok {
+					if v != nil {
+						meta = *v
+					}
+				} else if v, ok := metaData.(dto.Meta); ok {
+					meta = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxMetaReqResErr arg: meta")
+				}
+			}
+		}
+
+		// 3. 调用方法
+		res, err := c.CtxMetaReqResErr(ctx, &meta, &req)
+
+		// 4. 处理返回值
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+	case "CtxMetaReqRes":
+		// 1. 准备 Req
+		var req dto.Req
+
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
+				}
+			}
+		} else {
+			// 本地调用 (Object)
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxMetaReqRes arg: req")
+				}
+			}
+		}
+
+		// 2. 准备 Meta
+		var meta dto.Meta
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := metaData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
+						return nil, err
+					}
+				}
+			}
+		} else {
+			// 本地调用 (Object)
+			if metaData != nil {
+				if v, ok := metaData.(*dto.Meta); ok {
+					if v != nil {
+						meta = *v
+					}
+				} else if v, ok := metaData.(dto.Meta); ok {
+					meta = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxMetaReqRes arg: meta")
+				}
+			}
+		}
+
+		// 3. 调用方法
+		res := c.CtxMetaReqRes(ctx, &meta, &req)
+
+		// 4. 处理返回值
+		return res, nil
+	case "CtxMetaReqErr":
+		// 1. 准备 Req
+		var req dto.Req
+
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
+				}
+			}
+		} else {
+			// 本地调用 (Object)
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxMetaReqErr arg: req")
+				}
+			}
+		}
+
+		// 2. 准备 Meta
+		var meta dto.Meta
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := metaData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
+						return nil, err
+					}
+				}
+			}
+		} else {
+			// 本地调用 (Object)
+			if metaData != nil {
+				if v, ok := metaData.(*dto.Meta); ok {
+					if v != nil {
+						meta = *v
+					}
+				} else if v, ok := metaData.(dto.Meta); ok {
+					meta = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxMetaReqErr arg: meta")
+				}
+			}
+		}
+
+		// 3. 调用方法
+		err := c.CtxMetaReqErr(ctx, &meta, &req)
+
+		// 4. 处理返回值
+		if err != nil {
+			return nil, err
+		}
+		return nil, nil
+	case "CtxMetaReq":
+		// 1. 准备 Req
+		var req dto.Req
+
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := bodyData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(reqCoderT, b, &req); err != nil {
+						return nil, err
+					}
+				}
+			}
+		} else {
+			// 本地调用 (Object)
+			if bodyData != nil {
+				if v, ok := bodyData.(*dto.Req); ok {
+					if v != nil {
+						req = *v
+					}
+				} else if v, ok := bodyData.(dto.Req); ok {
+					req = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxMetaReq arg: req")
+				}
+			}
+		}
+
+		// 2. 准备 Meta
+		var meta dto.Meta
+		if fromNetwork {
+			// 远程调用 (Bytes)
+			if b, ok := metaData.([]byte); ok {
+				if len(b) > 0 {
+					if err := coder.Unmarshal(metaCoderT, b, &meta); err != nil {
+						return nil, err
+					}
+				}
+			}
+		} else {
+			// 本地调用 (Object)
+			if metaData != nil {
+				if v, ok := metaData.(*dto.Meta); ok {
+					if v != nil {
+						meta = *v
+					}
+				} else if v, ok := metaData.(dto.Meta); ok {
+					meta = v
+				} else {
+					return nil, errors.New("local call type mismatch for CtxMetaReq arg: meta")
+				}
+			}
+		}
+
+		// 3. 调用方法
+		c.CtxMetaReq(ctx, &meta, &req)
 
 		// 4. 处理返回值
 		return nil, nil

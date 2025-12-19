@@ -149,11 +149,12 @@ func (c *Client) handleReq(ctx context.Context, h *header.Header, meta, body []b
 		ctx, cancel = context.WithDeadline(ctx, deadlineTime)
 		defer cancel()
 	}
-	res, err := c.invoke_local_func(ctx, h.Module, h.Method, h.MetaCoderT, h.ReqCoderT, meta, body)
+	// 网络请求，meta 和 body 都是 []byte
+	res, err := c.invoke_local_func(ctx, h.Module, h.Method, h.MetaCoderT, h.ReqCoderT, meta, body, true)
 	return c.sendReply(h, res, err)
 }
 
-func (c *Client) invoke_local_func(ctx context.Context, mod, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body any) (res any, err error) {
+func (c *Client) invoke_local_func(ctx context.Context, mod, method string, metaCoderT coder.T, reqCoderT coder.T, meta, body any, fromNetwork bool) (res any, err error) {
 	module, ok := c.serviceMap.Load(mod)
 	if !ok {
 		err = errors.New(errors.RemoteInternal, "module not found locally")
@@ -163,7 +164,7 @@ func (c *Client) invoke_local_func(ctx context.Context, mod, method string, meta
 		err = errors.New(errors.RemoteInternal, "module does not implement client_handler")
 		return
 	} else {
-		res, err = handler.HandleMsg(ctx, method, metaCoderT, reqCoderT, meta, body)
+		res, err = handler.HandleMsg(ctx, method, metaCoderT, reqCoderT, meta, body, fromNetwork)
 		return
 	}
 }
