@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/ndsky1003/crpc/v3/buffer"
+	"github.com/ndsky1003/crpc/v3/buffer/netpool"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
@@ -88,15 +88,16 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		if h.Deadline > 0 {
 			now := uint64(time.Now().UnixMicro())
 			if now >= h.Deadline {
-				// 可选：回包告知 Client 已超时（虽然 Client 可能已经不等了，但为了协议完整性建议回）
-				if h.Type == headertype.Req && h.Flags.IsBroadcast() { //send 不需要回
+				if h.Type == headertype.Req && h.Flags.IsBroadcast() {
 					h.Flags.With(headerflags.EOS)
 				}
+				netpool.Release(data)
 				defer h.Release()
 				return s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "server-side timeout deadline exceeded"))
 			}
 		}
 		if h.Flags.IsHandshake() {
+			netpool.Release(data)
 			defer h.Release()
 			if err := s.handleVerify(sess, body); err != nil {
 				return s.replyVerify(sess, h, err)
@@ -106,25 +107,9 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		}
 	}
 
-	copy_meta := buffer.Get()
-	meta_l, err := copy_meta.Write(meta)
-	if err != nil {
-		h.Release()
-		copy_meta.Release()
-		return err
-	}
-	copy_body := buffer.Get()
-	body_l, err := copy_body.Write(body)
-	if err != nil {
-		h.Release()
-		copy_meta.Release()
-		copy_body.Release()
-		return err
-	}
 	task := func() {
+		defer netpool.Release(data)
 		defer h.Release()
-		defer copy_meta.Release()
-		defer copy_body.Release()
 		// 1. 获取 Context
 		handlers := make(HandlersChain, 0, len(s.handlers)+1)
 		if len(s.handlers) > 0 {
@@ -133,20 +118,13 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		ctx := &Context{
 			Sess:      sess,
 			Header:    h, //一个池化对象，放到了一个非池化的身上,现在的环境下，生命周期是一样的，所以不存在问题
-			MetaBytes: copy_meta.Bytes()[:meta_l],
-			BodyBytes: copy_body.Bytes()[:body_l],
+			MetaBytes: meta,
+			BodyBytes: body,
 			index:     -1,
 			handlers:  handlers,
 			// Keys map 不需要预分配，用到再分配，省内存
 		}
 
-		// 2. 初始化
-		ctx.Sess = sess
-		ctx.Header = h
-		ctx.MetaBytes = copy_meta.Bytes()[:meta_l]
-		ctx.BodyBytes = copy_body.Bytes()[:body_l]
-
-		// 3. 构造最后一环 Handler
 		finalHandler := func(c *Context) {
 			// 调用原有的 route 逻辑
 			err := s.route(c.Sess, c.Header, c.MetaBytes, c.BodyBytes)
@@ -158,8 +136,8 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		// 5. 执行
 		ctx.Next()
 
-		// 6. 错误日志 (可选)
-		if h.Type == headertype.Req {
+		switch h.Type {
+		case headertype.Req:
 			if err := ctx.Err(); err != nil {
 				// 优先返回具体的错误信息 (token invalid, rate limit 等)
 				// 不管是否 Abort，只要有 Err，就以 Err 为主
@@ -170,17 +148,25 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 				// 必须回包，防止客户端超时
 				s.replyError(sess, h, errors.New(errors.ServerStandardError, "request aborted by middleware"))
 			}
-		} else {
-			// Send 类型 (OneWay)：仅记录日志，不回包
+		case headertype.Send:
 			if err := ctx.Err(); err != nil {
-				slog.Warn("async send request process", "err", err)
+				slog.Error("async send request process", "err", err)
 			}
+		case headertype.Res:
+			if err := ctx.Err(); err != nil {
+				slog.Error("res process", "err", err)
+			}
+		default:
+			slog.Warn("unknow type", "type", h.Type)
+
+		}
+		if h.Type == headertype.Req {
+		} else { //send,res
 		}
 	}
 	if err = s.workPool.Submit(task); err != nil {
 		h.Release()
-		copy_meta.Release()
-		copy_body.Release()
+		netpool.Release(data)
 		if err == ants.ErrPoolOverload {
 			return errors.New(errors.ServerInternal, "server busy")
 		}
@@ -302,6 +288,7 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 		target, err = group.Select()
 	}
 	if err != nil {
+		slog.Error(group.Name, "err", err)
 		return errors.New(errors.ServerInternal, "no available service instance")
 	}
 

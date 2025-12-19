@@ -113,20 +113,22 @@ func MwBroadcast(c *Client) HandlerFunc {
 		if ctx.IsAborted() {
 			return
 		}
-		opt := ctx.MergedOpt
-		if b := opt.Broadcast; b != nil && *b {
-			ctx.Header.Flags.Add(headerflags.Broadcast)
-			call := ctx.Call
-			if opt.BroadcastResNewFunc == nil || opt.BroadcastResCallBack == nil {
-				//eg: 这里中断了释放call，会跑到兜底的逻辑里面去
-				ctx.AbortWithError(errors.New(errors.ClientInvalidArgs, "BroadcastResNewFunc/CallBack required"))
-				return
+		if ctx.CallType != headertype.Send { //只有req支持广播
+			opt := ctx.MergedOpt
+			if b := opt.Broadcast; b != nil && *b {
+				ctx.Header.Flags.Add(headerflags.Broadcast)
+				call := ctx.Call
+				if opt.BroadcastResNewFunc == nil || opt.BroadcastResCallBack == nil {
+					//eg: 这里中断了释放call，会跑到兜底的逻辑里面去
+					ctx.AbortWithError(errors.New(errors.ClientInvalidArgs, "BroadcastResNewFunc/CallBack required"))
+					return
+				}
+				call.BroadcastResNewFunc = opt.BroadcastResNewFunc
+				call.BroadcastResCallBack = opt.BroadcastResCallBack
+				call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
+				call.subCtx, call.subCancel = context.WithCancel(context.Background())
+				go c.processBroadcastLoop(call.subCtx, call)
 			}
-			call.BroadcastResNewFunc = opt.BroadcastResNewFunc
-			call.BroadcastResCallBack = opt.BroadcastResCallBack
-			call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
-			call.subCtx, call.subCancel = context.WithCancel(context.Background())
-			go c.processBroadcastLoop(call.subCtx, call)
 		}
 		ctx.Next()
 	}
