@@ -40,6 +40,21 @@ type method_meta struct {
 
 // HandleMsg 动态分发
 func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCoderT coder.T, reqCoderT coder.T, metaData, bodyData any) (any, error) {
+	info, err := s.getMethodInfo(method)
+	if err != nil {
+		return nil, err
+	}
+
+	args, err := s.buildArgs(ctx, info, metaCoderT, reqCoderT, metaData, bodyData)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.invokeMethod(info, args)
+}
+
+// getMethodInfo 获取方法元信息
+func (s *dynamic_service) getMethodInfo(method string) (*method_meta, error) {
 	s.RLock()
 	info, ok := s.methods[method]
 	s.RUnlock()
@@ -47,7 +62,11 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 	if !ok {
 		return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("method %s not found in dynamic module", method))
 	}
+	return info, nil
+}
 
+// buildArgs 构建调用参数
+func (s *dynamic_service) buildArgs(ctx context.Context, info *method_meta, metaCoderT, reqCoderT coder.T, metaData, bodyData any) ([]reflect.Value, error) {
 	var args []reflect.Value
 
 	// 1. Arg: Context
@@ -57,94 +76,39 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 
 	// 2. Arg: Meta
 	if info.hasMeta {
-		var metaVal reflect.Value
-
-		// 检查是否为有效的本地对象 (非 nil 且 非 []byte)
-		isLocalObj := false
-		if metaData != nil {
-			if _, isBytes := metaData.([]byte); !isBytes {
-				isLocalObj = true
-			}
+		processor := &paramProcessor{
+			data:      metaData,
+			target:    info.metaType,
+			coderT:    metaCoderT,
+			paramName: "meta",
 		}
-
-		if isLocalObj {
-			// --- 本地调用优化: 直接使用对象，避免 reflect.New + Set ---
-			val := reflect.ValueOf(metaData)
-
-			// 使用公共函数适配类型
-			adaptedVal, err := adaptValueForType(val, info.metaType)
-			if err != nil {
-				return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("local call meta type mismatch: %v", err))
-			}
-			metaVal = adaptedVal
-		} else {
-			// --- 远程调用: 走反序列化 ---
-			isPtr := info.metaType.Kind() == reflect.Pointer
-			if isPtr {
-				metaVal = reflect.New(info.metaType.Elem())
-			} else {
-				metaVal = reflect.New(info.metaType).Elem()
-			}
-
-			if bytes, ok := metaData.([]byte); ok && len(bytes) > 0 {
-				ptr := metaVal
-				if !isPtr {
-					ptr = metaVal.Addr()
-				}
-				if err := coder.Unmarshal(metaCoderT, bytes, ptr.Interface()); err != nil {
-					return nil, errors.New(errors.RemoteInternal, "unmarshal meta error: "+err.Error())
-				}
-			}
+		metaVal, err := processor.process()
+		if err != nil {
+			return nil, errors.New(errors.RemoteInternal, err.Error())
 		}
 		args = append(args, metaVal)
 	}
 
 	// 3. Arg: Request
 	if info.hasReq {
-		var reqVal reflect.Value
-
-		// 检查是否为有效的本地对象 (非 nil 且 非 []byte)
-		isLocalObj := false
-		if bodyData != nil {
-			if _, isBytes := bodyData.([]byte); !isBytes {
-				isLocalObj = true
-			}
+		processor := &paramProcessor{
+			data:      bodyData,
+			target:    info.reqType,
+			coderT:    reqCoderT,
+			paramName: "req",
 		}
-
-		if isLocalObj {
-			// --- 本地调用优化 ---
-			val := reflect.ValueOf(bodyData)
-
-			// 使用公共函数适配类型
-			adaptedVal, err := adaptValueForType(val, info.reqType)
-			if err != nil {
-				return nil, errors.New(errors.RemoteInternal, fmt.Sprintf("local call req type mismatch: %v", err))
-			}
-			reqVal = adaptedVal
-
-		} else {
-			// --- 远程调用 ---
-			isPtr := info.reqType.Kind() == reflect.Pointer
-			if isPtr {
-				reqVal = reflect.New(info.reqType.Elem())
-			} else {
-				reqVal = reflect.New(info.reqType).Elem()
-			}
-
-			if bytes, ok := bodyData.([]byte); ok && len(bytes) > 0 {
-				ptr := reqVal
-				if !isPtr {
-					ptr = reqVal.Addr()
-				}
-				if err := coder.Unmarshal(reqCoderT, bytes, ptr.Interface()); err != nil {
-					return nil, errors.New(errors.RemoteInternal, "unmarshal req error: "+err.Error())
-				}
-			}
+		reqVal, err := processor.process()
+		if err != nil {
+			return nil, errors.New(errors.RemoteInternal, err.Error())
 		}
 		args = append(args, reqVal)
 	}
 
-	// 调用函数
+	return args, nil
+}
+
+// invokeMethod 调用方法并处理返回值
+func (s *dynamic_service) invokeMethod(info *method_meta, args []reflect.Value) (any, error) {
 	results := info.fn.Call(args)
 
 	var res any
@@ -153,7 +117,11 @@ func (s *dynamic_service) HandleMsg(ctx context.Context, method string, metaCode
 	if info.returnErr {
 		errVal := results[info.errIndex]
 		if !errVal.IsNil() {
-			err = errVal.Interface().(error)
+			if errInterface, ok := errVal.Interface().(error); ok {
+				err = errInterface
+			} else {
+				err = fmt.Errorf("method returned non-error type: %T", errVal.Interface())
+			}
 		}
 	}
 
@@ -186,6 +154,68 @@ func adaptValueForType(val reflect.Value, targetType reflect.Type) (reflect.Valu
 	}
 
 	return reflect.Value{}, fmt.Errorf("type mismatch: cannot assign %v to %v", val.Type(), targetType)
+}
+
+// paramProcessor 统一处理meta和request参数，减少代码重复
+type paramProcessor struct {
+	data      any
+	target    reflect.Type
+	coderT    coder.T
+	paramName string
+}
+
+func (p *paramProcessor) process() (reflect.Value, error) {
+	// 检查是否为有效的本地对象 (非 nil 且 非 []byte)
+	isLocalObj := false
+	if p.data != nil {
+		if _, isBytes := p.data.([]byte); !isBytes {
+			isLocalObj = true
+		}
+	}
+
+	if isLocalObj {
+		return p.processLocalCall()
+	}
+	return p.processRemoteCall()
+}
+
+func (p *paramProcessor) processLocalCall() (reflect.Value, error) {
+	val := reflect.ValueOf(p.data)
+	adaptedVal, err := adaptValueForType(val, p.target)
+	if err != nil {
+		return reflect.Value{}, fmt.Errorf("local call %s type mismatch: %v", p.paramName, err)
+	}
+	return adaptedVal, nil
+}
+
+func (p *paramProcessor) processRemoteCall() (reflect.Value, error) {
+	isPtr := p.target.Kind() == reflect.Pointer
+	var val reflect.Value
+
+	if isPtr {
+		val = reflect.New(p.target.Elem())
+	} else {
+		val = reflect.New(p.target).Elem()
+	}
+
+	if bytes, ok := p.data.([]byte); ok && len(bytes) > 0 {
+		ptr := val
+		if !isPtr {
+			ptr = val.Addr()
+		}
+
+		if err := coder.Unmarshal(p.coderT, bytes, ptr.Interface()); err != nil {
+			var errMsg error
+			if p.paramName == "meta" {
+				errMsg = fmt.Errorf("unmarshal meta error: %v", err)
+			} else {
+				errMsg = fmt.Errorf("unmarshal req error: %v", err)
+			}
+			return reflect.Value{}, errMsg
+		}
+	}
+
+	return val, nil
 }
 
 func (c *Client) registerStructMethods(serviceName string, rcvrVal reflect.Value) error {
