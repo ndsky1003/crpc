@@ -60,12 +60,17 @@ type ServiceGroup struct {
 	Sessions     []*Session          // 所有有效节点（Weight > 0）
 	TotalWeight  int                 // 所有节点权重之和
 	Name         string              // 服务组名称
+	buildNumber  atomic.Int64        // 递增序列号
 	ring         atomic.Value        // 存储 *consistentHashRing（原子读写）
 	replicas     int                 // 每个权重单位的虚拟节点数
 	sessionMap   map[string]*Session // sid -> Session 的快速查找表
 
 	// 使用 sync.Pool 复用随机数生成器，减少锁竞争
 	randomPool *sync.Pool
+
+	//防抖
+	rebuildTimer *time.Timer
+	rebuildDelay time.Duration
 
 	// 监控指标
 	selectCount    atomic.Uint64 // 选择操作计数
@@ -93,12 +98,13 @@ func NewServiceGroup(name string, replicas int) (*ServiceGroup, error) {
 	}
 
 	sg := &ServiceGroup{
-		Name:       name,
-		Sessions:   make([]*Session, 0),
-		replicas:   replicas,
-		sessionMap: make(map[string]*Session),
+		Name:         name,
+		Sessions:     make([]*Session, 0),
+		replicas:     replicas,
+		sessionMap:   make(map[string]*Session),
+		rebuildDelay: 500 * time.Millisecond,
 		randomPool: &sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				// 每个 goroutine 创建独立的随机数生成器
 				return rand.New(rand.NewSource(time.Now().UnixNano()))
 			},
@@ -168,7 +174,7 @@ func (sg *ServiceGroup) Add(s *Session) error {
 	sg.sessionMap[sid] = s
 
 	// 异步重建哈希环，减少锁持有时间
-	go sg.asyncRebuildHashRing()
+	sg.scheduleRebuild()
 
 	return nil
 }
@@ -209,13 +215,26 @@ func (sg *ServiceGroup) Remove(sid string) error {
 	delete(sg.sessionMap, sid)
 
 	// 异步重建哈希环
-	go sg.asyncRebuildHashRing()
+	sg.scheduleRebuild()
 
 	return nil
 }
 
-// asyncRebuildHashRing 异步重建哈希环（避免阻塞写操作）
+// 防抖是预防消耗,重建hash环的性能
+func (sg *ServiceGroup) scheduleRebuild() {
+	if sg.rebuildTimer != nil {
+		sg.rebuildTimer.Stop()
+	}
+	sg.rebuildTimer = time.AfterFunc(sg.rebuildDelay, func() {
+		sg.asyncRebuildHashRing()
+	})
+}
+
+// ring是copy_on_write
+// buildNumber 变种的乐观锁,只有最后那个可以覆盖成功
 func (sg *ServiceGroup) asyncRebuildHashRing() {
+	newbuilderid := sg.buildNumber.Add(1)
+
 	// 复制必要的数据
 	sg.RLock()
 	sessions := make([]*Session, len(sg.Sessions))
@@ -226,8 +245,10 @@ func (sg *ServiceGroup) asyncRebuildHashRing() {
 	// 在锁外重建哈希环
 	newRing := sg.buildHashRing(sessions, replicas)
 
-	// 原子替换
-	sg.ring.Store(newRing)
+	if sg.buildNumber.CompareAndSwap(newbuilderid, newbuilderid) {
+		// 原子替换
+		sg.ring.Store(newRing)
+	}
 	sg.rebuildCount.Add(1)
 }
 
@@ -446,7 +467,11 @@ func (sg *ServiceGroup) GetMetrics() Metrics {
 	sg.RLock()
 	defer sg.RUnlock()
 
-	ring := sg.ring.Load().(*consistentHashRing)
+	ringVal := sg.ring.Load()
+	ring, ok := ringVal.(*consistentHashRing)
+	if !ok {
+		return Metrics{} // 返回空指标或错误
+	}
 	return Metrics{
 		NodeCount:        len(sg.Sessions),
 		TotalWeight:      sg.TotalWeight,
