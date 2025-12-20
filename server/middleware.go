@@ -17,9 +17,8 @@ type Context struct {
 	Sess server.Session
 
 	// 原始数据信息
-	Header    *header.Header //这个是池化的
-	MetaBytes []byte         // 原始 Meta 数据
-	BodyBytes []byte         // 原始 Body 数据
+	Header *header.Header //这个是池化的
+	Data   []byte         //整体的数据
 
 	// 错误处理
 	err error

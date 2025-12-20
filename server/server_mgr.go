@@ -7,8 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	"github.com/ndsky1003/crpc/v3/buffer/netpool"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/protocol"
@@ -57,7 +55,7 @@ func (s *server_mgr) Close() error {
 // --- net.service_manager 接口实现 ---
 
 func (s *server_mgr) OnConnect(sess server.Session) error {
-	s.connCache.Store(sess.ID(), sess)
+	// s.connCache.Store(sess.ID(), sess)
 	return nil
 }
 
@@ -80,29 +78,40 @@ func (s *server_mgr) OnDisconnect(sess server.Session, err error) error {
 }
 
 func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
-	h, meta, body, err := protocol.Unpack(data)
+	h, err := protocol.PeekHeader(data)
 	if err != nil {
 		return fmt.Errorf("unpack error: %v", err)
 	}
+	if h.Flags.IsHandshake() {
+		h.Release()
+		h1, _, body, err := protocol.Unpack(data)
+		if err != nil {
+			return fmt.Errorf("unpack error: %v", err)
+		}
+		netpool.Release(data)
+		defer h1.Release()
+		if err := s.handleVerify(sess, body); err != nil {
+			return s.replyVerify(sess, h1, err)
+		} else {
+			return s.replyVerify(sess, h1, nil)
+		}
+	}
+
 	if h.Type.IsReq() {
 		if h.Deadline > 0 {
 			now := uint64(time.Now().UnixMicro())
-			if now >= h.Deadline {
-				if h.Type == headertype.Req && h.Flags.IsBroadcast() {
-					h.Flags.With(headerflags.EOS)
-				}
+			if now >= h.Deadline { //超时
 				netpool.Release(data)
 				defer h.Release()
-				return s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "server-side timeout deadline exceeded"))
-			}
-		}
-		if h.Flags.IsHandshake() {
-			netpool.Release(data)
-			defer h.Release()
-			if err := s.handleVerify(sess, body); err != nil {
-				return s.replyVerify(sess, h, err)
-			} else {
-				return s.replyVerify(sess, h, nil)
+				if h.Type == headertype.Req {
+					if h.Flags.IsBroadcast() {
+						h.Flags.With(headerflags.EOS)
+					}
+					return s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "server-side timeout deadline exceeded"))
+				} else {
+					slog.Warn("收到的消息已经超时直接丢弃", "header", h, "data", data)
+					return nil
+				}
 			}
 		}
 	}
@@ -116,18 +125,17 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 			handlers = append(handlers, s.handlers...)
 		}
 		ctx := &Context{
-			Sess:      sess,
-			Header:    h, //一个池化对象，放到了一个非池化的身上,现在的环境下，生命周期是一样的，所以不存在问题
-			MetaBytes: meta,
-			BodyBytes: body,
-			index:     -1,
-			handlers:  handlers,
+			Sess:     sess,
+			Header:   h, //一个池化对象，放到了一个非池化的身上,现在的环境下，生命周期是一样的，所以不存在问题
+			Data:     data,
+			index:    -1,
+			handlers: handlers,
 			// Keys map 不需要预分配，用到再分配，省内存
 		}
 
 		finalHandler := func(c *Context) {
 			// 调用原有的 route 逻辑
-			err := s.route(c.Sess, c.Header, c.MetaBytes, c.BodyBytes)
+			err := s.route(c.Sess, c.Header, c.Data)
 			c.SetError(err)
 		}
 
@@ -160,9 +168,6 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 			slog.Warn("unknow type", "type", h.Type)
 
 		}
-		if h.Type == headertype.Req {
-		} else { //send,res
-		}
 	}
 	if err = s.workPool.Submit(task); err != nil {
 		h.Release()
@@ -175,19 +180,18 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 	return nil
 }
 
-func (s *server_mgr) route(sess server.Session, h *header.Header, meta, body []byte) error {
+func (s *server_mgr) route(sess server.Session, h *header.Header, data []byte) error {
 	if h.Type.IsReq() {
-		return s.handleReq(sess, h, meta, body)
+		return s.handleReq(sess, h, data)
 	} else {
-		return s.handleRes(sess, h, meta, body)
+		return s.handleRes(sess, h, data)
 	}
 }
 
-func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body []byte) error {
-	h.UUID = sess.ID() //返回链路
+func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byte) error {
 	val, ok := s.services.Load(h.ToService)
 	if !ok {
-		if h.Type == headertype.Req && h.Flags.IsBroadcast() { //send 不需要回
+		if h.Flags.IsBroadcast() {
 			h.Flags.With(headerflags.EOS)
 		}
 		slog.Warn("not found for request", "service", h.ToService)
@@ -197,7 +201,7 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 	timeout := *s.opt.SendTimeout
 	if deadline := h.Deadline; deadline != 0 {
 		if t := time.Until(time.UnixMicro(int64(deadline))); t <= 0 {
-			if h.Type == headertype.Req && h.Flags.IsBroadcast() { //send 不需要回
+			if h.Flags.IsBroadcast() {
 				h.Flags.With(headerflags.EOS)
 			}
 			return errors.New(errors.ServerDeadlineExceeded, "broadcast request deadline exceeded")
@@ -237,38 +241,36 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 			}
 			return errors.New(errors.ServerServiceUnavailable, "无可广播的对象")
 		}
-		packet, err := protocol.Pack(h, meta, body)
-		if err != nil {
-			if h.Type == headertype.Req { //send 不需要回
-				h.Flags.With(headerflags.EOS)
-			}
-			return err
-		}
 		count := int32(len(realTargets))
+		copy_h := h.Clone()
 		callBack := func() {
-			//TODO:这里应该补发一个EOS的回包
+			if copy_h.Type == headertype.Req {
+				copy_h.Flags.With(headerflags.EOS)
+			}
+			if replyErr := s.replyError(sess, copy_h, errors.New(errors.ServerDeadlineExceeded, "广播等待接收消息超时")); replyErr != nil {
+				slog.Error("replyError", "err", replyErr)
+			}
 		}
 		s.broadcastCounter.setBroadcastCount(sid, seq, count, timeout, callBack)
 
 		for _, t := range realTargets {
 			target := t
-			copy_h := *h
 			handleFailure := func(err error) {
 				if remain := s.broadcastCounter.decreaseBroadcastCount(sid, seq); remain <= 0 {
 					copy_h.Flags.With(headerflags.EOS)
 				}
-				if replyErr := s.replyError(sess, &copy_h, err); replyErr != nil {
+				if replyErr := s.replyError(sess, copy_h, err); replyErr != nil {
 					slog.Error("replyError", "err", replyErr)
 				}
 			}
 			task := func() {
-				if err := target.Sends(context.Background(), packet, server.Options().WithConn(func(o *conn.Option) {
+				if err := target.Send(context.Background(), data, server.Options().WithConn(func(o *conn.Option) {
 					o.SetWriteTimeout(timeout)
 				})); err != nil {
 					handleFailure(err)
 				}
 			}
-			if err = s.workPool.Submit(task); err != nil {
+			if err := s.workPool.Submit(task); err != nil {
 				if err == ants.ErrPoolOverload {
 					err = errors.New(errors.ServerInternal, "server busy")
 				} else {
@@ -295,10 +297,10 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, meta, body
 	if target == nil {
 		return errors.New(errors.ServerDeadlineExceeded, "no available service instance")
 	}
-	return s.forward(target.Session, h, meta, body, timeout)
+	return s.forward(target.Session, h, data, timeout)
 }
 
-func (s *server_mgr) handleRes(_ server.Session, h *header.Header, meta, body []byte) error {
+func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data []byte) error {
 	tosid := h.UUID
 	target, ok := s.connCache.Load(tosid)
 	if !ok {
@@ -314,105 +316,11 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, meta, body []
 		// 注意：如果重启了 Server 或者超时清理了 Map，
 		// 可能会导致 EOS 丢失，Client 会依赖超时机制兜底。
 	}
-	return s.forward(targetSess, h, meta, body, *s.opt.SendTimeout)
+	return s.forward(targetSess, h, data, *s.opt.SendTimeout)
 }
 
-// handleVerify 处理服务注册鉴权
-func (s *server_mgr) handleVerify(sess server.Session, body []byte) error {
-	secret := *s.opt.Secret
-
-	var claim protocol.JwtClaims
-	token, err := jwt.ParseWithClaims(string(body), &claim, func(token *jwt.Token) (any, error) {
-		return []byte(secret), nil
-	})
-
-	if err != nil || !token.Valid {
-		return errors.Newf(errors.ServerInternal, "jwt verify failed: %v", err)
-	}
-
-	var req protocol.VerifyReq
-	if err := coder.Unmarshal(coder.Msgp, claim.Data, &req); err != nil {
-		return errors.Newf(errors.ServerInternal, "unmarshal verify req failed: %v", err)
-	}
-	if req.UUID != uuid.Nil {
-		sess.SetID(req.UUID)
-	}
-
-	if oldGroupVal, loaded := s.sidGroupIndex.Load(sess.ID()); loaded {
-		oldGroupName := oldGroupVal.(string)
-		if oldGroupName != req.Name { // 如果名字变了，说明切换了身份
-			if gVal, ok := s.services.Load(oldGroupName); ok {
-				gVal.(*ServiceGroup).Remove(sess.ID().String())
-			}
-		}
-	}
-	// 获取或创建 ServiceGroup
-	g, err := NewServiceGroup(req.Name, *s.opt.GroupReplicas)
-	if err != nil {
-		//TODO: 这里需要从头理解
-		return errors.Newf(errors.ServerInternal, "create service group failed: %v", err)
-	}
-
-	val, _ := s.services.LoadOrStore(req.Name, g)
-	group := val.(*ServiceGroup)
-
-	group.Add(&Session{
-		Name:    req.Name,
-		Weight:  req.Weight,
-		Session: sess,
-	})
-
-	s.sidGroupIndex.Store(sess.ID(), req.Name)
-
-	slog.Info("Service Registered", "Name", req.Name, "sid", sess.ID(), "weight", req.Weight)
-
-	return nil
-}
-
-// replyVerify 回复鉴权结果
-func (s *server_mgr) replyVerify(sess server.Session, reqH *header.Header, verifyErr error) error {
-	resp := &protocol.VerifyRes{
-		Message: "OK",
-	}
-	reqH.Code = headercode.OK
-
-	if verifyErr != nil {
-		slog.Error("Authentication failed", "err", verifyErr, "sid", sess.ID())
-		// 返回通用错误信息，避免泄露JWT验证的敏感信息
-		resp.Message = "Authentication failed"
-		reqH.Code = headercode.Failed
-	} else {
-		resp.UUID = sess.ID()
-	}
-	body, err := coder.Marshal(coder.Msgp, resp)
-	if err != nil {
-		return err
-	}
-	payload := protocol.JwtClaims{
-		Data: body,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)), // 短期有效
-		},
-	}
-	tokenString, err := jwt.NewWithClaims(jwt.SigningMethodHS256, payload).SignedString([]byte(*s.opt.Secret))
-	if err != nil {
-		return err
-	}
-	reqH.Type = headertype.Res
-	packet, err := protocol.Pack(reqH, nil, []byte(tokenString))
-	if err != nil {
-		return err
-	}
-	return sess.Sends(context.Background(), packet)
-}
-
-func (s *server_mgr) forward(sess server.Session, h *header.Header, meta, body []byte, timeout time.Duration) error {
-	// 直接透传，协议头保持不变
-	packet, err := protocol.Pack(h, meta, body)
-	if err != nil {
-		return err
-	}
-	return sess.Sends(context.Background(), packet, server.Options().WithConn(func(o *conn.Option) {
+func (s *server_mgr) forward(sess server.Session, h *header.Header, data []byte, timeout time.Duration) error {
+	return sess.Send(context.Background(), data, server.Options().WithConn(func(o *conn.Option) {
 		o.SetWriteTimeout(timeout)
 	}))
 }

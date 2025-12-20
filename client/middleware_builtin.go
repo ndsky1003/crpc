@@ -62,6 +62,7 @@ func MwHeader(c *Client) HandlerFunc {
 			SetResCoderT(*opt.ResCoderT).
 			SetCompressT(*opt.CompressT).
 			SetToService(ctx.Service).
+			SetUUID(c.UUID). //避免server再次打包
 			SetModule(ctx.Module).
 			SetMethod(ctx.Func).
 			SetSeq(ctx.Seq)
@@ -113,22 +114,20 @@ func MwBroadcast(c *Client) HandlerFunc {
 		if ctx.IsAborted() {
 			return
 		}
-		if ctx.CallType != headertype.Send { //只有req支持广播
-			opt := ctx.MergedOpt
-			if b := opt.Broadcast; b != nil && *b {
-				ctx.Header.Flags.Add(headerflags.Broadcast)
-				call := ctx.Call
-				if opt.BroadcastResNewFunc == nil || opt.BroadcastResCallBack == nil {
-					//eg: 这里中断了释放call，会跑到兜底的逻辑里面去
-					ctx.AbortWithError(errors.New(errors.ClientInvalidArgs, "BroadcastResNewFunc/CallBack required"))
-					return
-				}
-				call.BroadcastResNewFunc = opt.BroadcastResNewFunc
-				call.BroadcastResCallBack = opt.BroadcastResCallBack
-				call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
-				call.subCtx, call.subCancel = context.WithCancel(context.Background())
-				go c.processBroadcastLoop(call.subCtx, call)
+		opt := ctx.MergedOpt
+		if b := opt.Broadcast; b != nil && *b {
+			ctx.Header.Flags.Add(headerflags.Broadcast)
+			call := ctx.Call
+			if opt.BroadcastResNewFunc == nil || opt.BroadcastResCallBack == nil {
+				//eg: 这里中断了释放call，会跑到兜底的逻辑里面去
+				ctx.AbortWithError(errors.New(errors.ClientInvalidArgs, "BroadcastResNewFunc/CallBack required"))
+				return
 			}
+			call.BroadcastResNewFunc = opt.BroadcastResNewFunc
+			call.BroadcastResCallBack = opt.BroadcastResCallBack
+			call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
+			call.subCtx, call.subCancel = context.WithCancel(context.Background())
+			go c.processBroadcastLoop(call.subCtx, call)
 		}
 		ctx.Next()
 	}
