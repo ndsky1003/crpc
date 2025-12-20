@@ -50,21 +50,21 @@ func (b *broadcastCounterAll) Stop() {
 }
 
 // setBroadcastCount 设置计数
-func (s *broadcastCounterAll) setBroadcastCount(id uuid.UUID, seq uint64, count int32, timeout time.Duration, timeoutCallback func()) {
+func (s *broadcastCounterAll) setBroadcastCount(sid uuid.UUID, seq uint64, count int32, timeout time.Duration, timeoutCallback func()) {
 	// 1. 获取 Group (使用双重检查锁定，尽量减少写锁持有时间)
 	s.l.RLock()
-	group, ok := s.groups[id]
+	group, ok := s.groups[sid]
 	s.l.RUnlock()
 
 	if !ok {
 		s.l.Lock()
 		// 二次检查
-		group, ok = s.groups[id]
+		group, ok = s.groups[sid]
 		if !ok {
 			group = &broadcastCounterGroup{
 				items: make(map[uint64]*broadcastCounterItem),
 			}
-			s.groups[id] = group
+			s.groups[sid] = group
 		}
 		s.l.Unlock()
 	}
@@ -157,7 +157,7 @@ func (s *broadcastCounterAll) startCleanupLoop(interval time.Duration) {
 }
 
 func (s *broadcastCounterAll) cleanup() {
-	var expiration = s.expiration
+	expiration := s.expiration
 	threshold := time.Now().Add(-expiration).Unix()
 
 	s.l.RLock()

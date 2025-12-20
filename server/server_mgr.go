@@ -78,22 +78,17 @@ func (s *server_mgr) OnDisconnect(sess server.Session, err error) error {
 }
 
 func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
-	h, err := protocol.PeekHeader(data)
+	h, meta, body, err := protocol.Unpack(data)
 	if err != nil {
 		return fmt.Errorf("unpack error: %v", err)
 	}
 	if h.Flags.IsHandshake() {
-		h.Release()
-		h1, _, body, err := protocol.Unpack(data)
-		if err != nil {
-			return fmt.Errorf("unpack error: %v", err)
-		}
-		netpool.Release(data)
-		defer h1.Release()
+		defer netpool.Release(data)
+		defer h.Release()
 		if err := s.handleVerify(sess, body); err != nil {
-			return s.replyVerify(sess, h1, err)
+			return s.replyVerify(sess, h, err)
 		} else {
-			return s.replyVerify(sess, h1, nil)
+			return s.replyVerify(sess, h, nil)
 		}
 	}
 
@@ -135,7 +130,7 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 
 		finalHandler := func(c *Context) {
 			// 调用原有的 route 逻辑
-			err := s.route(c.Sess, c.Header, c.Data)
+			err := s.route(c.Sess, c.Header, c.Data, meta, body)
 			c.SetError(err)
 		}
 
@@ -180,11 +175,11 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 	return nil
 }
 
-func (s *server_mgr) route(sess server.Session, h *header.Header, data []byte) error {
+func (s *server_mgr) route(sess server.Session, h *header.Header, data, meta, body []byte) error {
 	if h.Type.IsReq() {
 		return s.handleReq(sess, h, data)
 	} else {
-		return s.handleRes(sess, h, data)
+		return s.handleRes(sess, h, data, meta, body)
 	}
 }
 
@@ -293,14 +288,14 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byt
 		slog.Error(group.Name, "err", err)
 		return errors.New(errors.ServerInternal, "no available service instance")
 	}
-
 	if target == nil {
 		return errors.New(errors.ServerDeadlineExceeded, "no available service instance")
 	}
-	return s.forward(target.Session, h, data, timeout)
+	return s.forward(target.Session, data, timeout)
 }
 
-func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data []byte) error {
+func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, body []byte) error {
+	timeout := *s.opt.SendTimeout
 	tosid := h.UUID
 	target, ok := s.connCache.Load(tosid)
 	if !ok {
@@ -308,19 +303,35 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data []byte) 
 		return fmt.Errorf("target session %s not found for response", tosid)
 	}
 	targetSess := target.(server.Session)
+	var need_pack bool
 	if h.Flags.IsBroadcast() {
 		if remain := s.broadcastCounter.decreaseBroadcastCount(tosid, h.Seq); remain <= 0 {
 			h.Flags.Add(headerflags.EOS)
+			need_pack = true
 		}
 		//NOTE:
 		// 注意：如果重启了 Server 或者超时清理了 Map，
 		// 可能会导致 EOS 丢失，Client 会依赖超时机制兜底。
 	}
-	return s.forward(targetSess, h, data, *s.opt.SendTimeout)
+	if need_pack {
+		// 直接透传，协议头保持不变
+		packet, err := protocol.Pack(h, meta, body)
+		if err != nil {
+			return err
+		}
+		return s.forwards(targetSess, packet, timeout)
+	}
+	return s.forward(targetSess, data, timeout)
 }
 
-func (s *server_mgr) forward(sess server.Session, h *header.Header, data []byte, timeout time.Duration) error {
+func (s *server_mgr) forward(sess server.Session, data []byte, timeout time.Duration) error {
 	return sess.Send(context.Background(), data, server.Options().WithConn(func(o *conn.Option) {
+		o.SetWriteTimeout(timeout)
+	}))
+}
+
+func (s *server_mgr) forwards(sess server.Session, data [][]byte, timeout time.Duration) error {
+	return sess.Sends(context.Background(), data, server.Options().WithConn(func(o *conn.Option) {
 		o.SetWriteTimeout(timeout)
 	}))
 }

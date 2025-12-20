@@ -98,13 +98,9 @@ func (c *Context) Clone() *Context {
 	// 4. 【关键】深拷贝 Body/Meta (防止 Use-After-Free)
 	// 因为原 Context 的 Bytes 指向的是 buffer pool，请求结束会被回收。
 	// 异步任务必须拥有自己独立的内存副本。
-	if len(c.MetaBytes) > 0 {
-		ctx.MetaBytes = make([]byte, len(c.MetaBytes))
-		copy(ctx.MetaBytes, c.MetaBytes)
-	}
-	if len(c.BodyBytes) > 0 {
-		ctx.BodyBytes = make([]byte, len(c.BodyBytes))
-		copy(ctx.BodyBytes, c.BodyBytes)
+	if len(c.Data) > 0 {
+		ctx.Data = make([]byte, len(c.Data))
+		copy(ctx.Data, c.Data)
 	}
 
 	// 注意：handlers 链不需要拷贝，因为它是只读的函数切片，且长期存在。
