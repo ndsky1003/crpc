@@ -199,9 +199,7 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byt
 			if h.Flags.IsBroadcast() {
 				h.Flags.With(headerflags.EOS)
 			}
-			return errors.New(errors.ServerDeadlineExceeded, "broadcast request deadline exceeded")
-		} else {
-			timeout = t
+			return errors.New(errors.ServerDeadlineExceeded, "request deadline exceeded")
 		}
 	}
 	// 2. 处理广播请求
@@ -239,18 +237,22 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byt
 		count := int32(len(realTargets))
 		copy_h := h.Clone()
 		callBack := func() {
-			if copy_h.Type == headertype.Req {
-				copy_h.Flags.With(headerflags.EOS)
-			}
+			copy_h.Flags.With(headerflags.EOS)
 			if replyErr := s.replyError(sess, copy_h, errors.New(errors.ServerDeadlineExceeded, "广播等待接收消息超时")); replyErr != nil {
 				slog.Error("replyError", "err", replyErr)
 			}
 		}
-		s.broadcastCounter.setBroadcastCount(sid, seq, count, timeout, callBack)
+		if copy_h.Type == headertype.Req {
+			s.broadcastCounter.setBroadcastCount(sid, seq, count, timeout, callBack)
+		}
 
 		for _, t := range realTargets {
 			target := t
 			handleFailure := func(err error) {
+				if copy_h.Type == headertype.Send {
+					slog.Error("broad cast send", "err", err)
+					return
+				}
 				if remain := s.broadcastCounter.decreaseBroadcastCount(sid, seq); remain <= 0 {
 					copy_h.Flags.With(headerflags.EOS)
 				}
@@ -314,7 +316,6 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, b
 		// 可能会导致 EOS 丢失，Client 会依赖超时机制兜底。
 	}
 	if need_pack {
-		// 直接透传，协议头保持不变
 		packet, err := protocol.Pack(h, meta, body)
 		if err != nil {
 			return err
