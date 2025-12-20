@@ -31,7 +31,7 @@ type Option struct {
 	BroadcastResNewFunc  func() any                  // 用于广播调用时创建返回值对象
 	BroadcastResCallBack func(any, error, bool) bool // 返回true表示继续广播,返回false表示停止广播
 	//链路追踪 从ctx => header => net => header => ctx
-	GenTraceID  func(context.Context) string                              // 用于生成TraceID的函数
+	GenTraceID  func(context.Context) string                              // 用于生成TraceID的函数,发送的时候用于获取上下文中的traceid
 	WithTraceID func(ctx context.Context, traceID string) context.Context // 用于将TraceID添加到context中的函数
 	//链路追踪 从ctx => header => net => header => ctx
 	client.Option

@@ -52,8 +52,12 @@ func Pack(h *header.Header, meta []byte, body []byte) ([][]byte, error) {
 
 // Unpack 解包
 func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
+	lengh := len(data)
+	if lengh == 0 {
+		return nil, nil, nil, errors.New("data length is zero")
+	}
 	// 最小长度变为 4 (Magic + Len)
-	if len(data) < 4 {
+	if lengh < 4 {
 		return nil, nil, nil, ErrPacketTooShort
 	}
 
@@ -67,7 +71,7 @@ func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
 	headLen := uint64(binary.BigEndian.Uint16(data[2:4]))
 
 	// 校验数据总长度是否足够容纳 Header
-	if len(data) < int(4+headLen) {
+	if lengh < int(4+headLen) {
 		return nil, nil, nil, ErrIncomplete
 	}
 

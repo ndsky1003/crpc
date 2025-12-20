@@ -30,7 +30,10 @@ type Call struct {
 	//broadcast 相关字段 start
 	BroadcastResNewFunc func() any // 用于广播调用时创建返回值对象
 	// 返回true表示继续广播,返回false表示停止广播,EOS只是表示不再有数据,比如超时了，err也存在，eos为true
-	// 有可能ret == nil，err ==nil eos == false ,比如广播的无任何返回值那种
+	//EOS 可能服务器会收到2条
+	// 1.超时
+	// 2.正常探测到最后一个返回值 ,这2个不在一个goroutine
+	//但是client本地会过滤掉后达到的那条。最终结果有可能远端执行了所有，但是收到超时的EOS
 	BroadcastResCallBack func(ret any, err error, eos bool) bool
 	broadcastCh          chan *broadcastResult
 	subCtx               context.Context
@@ -76,13 +79,17 @@ func (this *Call) done() {
 	}
 }
 
-func (c *Call) fixStop(res *broadcastResult) {
+// 不是一定是单线程执行，理论上有2个，一个是消费线程，一个是send满的那个goroutine
+// NOTE: 概率小的可怜
+func (c *Call) fixStop(res *broadcastResult) (isEOS bool) {
 	if res.fromLocal {
 		c.localStop.Store(true)
 	}
 	if res.IsEOS {
 		c.normalStop.Store(true)
 	}
+	isEOS = c.localStop.Load() && c.normalStop.Load()
+	return
 }
 
 // trySendBroadcastResult 尝试发送广播结果，如果通道满则丢弃，防止阻塞

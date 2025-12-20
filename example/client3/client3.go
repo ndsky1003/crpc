@@ -5,11 +5,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/ndsky1003/crpc/v3/client"
 	"github.com/ndsky1003/crpc/v3/example/comm"
 	"github.com/ndsky1003/crpc/v3/example/dto"
+	"github.com/ndsky1003/crpc/v3/example/trace"
+	"github.com/ndsky1003/log"
 )
 
 // ==========================================
@@ -164,8 +167,19 @@ func (s *MyStructService) CtxMetaReq(ctx context.Context, meta *dto.Meta, req *d
 // 3. Main 测试入口
 // ==========================================
 func main() {
+	log.SetDefault(log.Options().SetExtractorAttr(func(ctx context.Context, r *slog.Record) {
+		if tid := trace.ExtractorTraceID(ctx); tid != "" {
+			r.Add("trace_id", tid)
+		}
+	}).SetAddSource(true))
 	// 1. 初始化 Client
-	c, err := client.Dial(context.Background(), "client3", ":8080", client.Options().SetSecret("ddddd"))
+	c, err := client.Dial(context.Background(), "client3", ":8080",
+		client.Options().SetSecret("ddddd").
+			SetWithTraceID(func(ctx context.Context, tid string) context.Context {
+				return trace.WithTraceID(ctx, tid)
+			}).SetGenTraceID(func(ctx context.Context) string {
+			return trace.ExtractorTraceID(ctx)
+		}))
 	if err != nil {
 		fmt.Println("dial error:", err)
 		return

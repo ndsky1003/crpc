@@ -143,6 +143,9 @@ func (c *Client) HandleMsg(data []byte) error {
 }
 
 func (c *Client) handleReq(ctx context.Context, h *header.Header, meta, body []byte) error {
+	if h.Flags.IsDebug() {
+		slog.DebugContext(ctx, "handleReq", "header", h)
+	}
 	if h.Deadline > 0 {
 		deadlineTime := time.UnixMicro(int64(h.Deadline))
 		var cancel context.CancelFunc
@@ -169,20 +172,29 @@ func (c *Client) invoke_local_func(ctx context.Context, mod, method string, meta
 	}
 }
 
-func (c *Client) handleRes(_ context.Context, h *header.Header, body []byte) error {
+func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) error {
 	seq := h.Seq
 	isBroadcast := h.Flags.IsBroadcast()
-
+	if h.Flags.IsDebug() {
+		slog.DebugContext(ctx, "handleRes", "header", h)
+	}
 	if isBroadcast {
-		val, ok := c.pending.Load(seq)
-		if !ok {
-			return nil // 确实找不到了（可能已超时被清理）
+		//保证只收到一个EOS
+		var val any
+		var ok bool
+		if h.Flags.IsEOS() { //server那边2个goroutine，一个超时，一个正常返回的goroutine
+			val, ok = c.pending.LoadAndDelete(seq)
+			if !ok {
+				return nil // 确实找不到了（可能已超时被清理）
+			}
+		} else {
+			val, ok = c.pending.Load(seq)
+			if !ok {
+				return nil // 确实找不到了（可能已超时被清理）
+			}
 		}
 		call := val.(*Call)
 		d := &broadcastResult{rawBody: body, resCoderT: h.ResCoderT, code: h.Code, IsEOS: h.Flags.IsEOS()}
-		if h.Flags.IsEOS() {
-			call.normalStop.Store(true) // 标记为正常结束,可能响应过快最后一个包被丢弃了，但是还是当成正常结束
-		}
 		call.trySendBroadcastResult(d)
 	} else {
 		val, ok := c.pending.LoadAndDelete(seq)

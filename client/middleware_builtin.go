@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -77,6 +78,7 @@ func MwHeader(c *Client) HandlerFunc {
 		}
 		if *opt.Debug {
 			h.Flags.With(headerflags.Debug)
+			slog.DebugContext(ctx.Ctx, "MwHeader")
 		}
 
 		var finalDeadline time.Time
@@ -129,6 +131,9 @@ func MwBroadcast(c *Client) HandlerFunc {
 			call.BroadcastResCallBack = opt.BroadcastResCallBack
 			call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
 			call.subCtx, call.subCancel = context.WithCancel(context.Background())
+			if ctx.Header.Flags.IsDebug() {
+				slog.DebugContext(ctx.Ctx, "MwBroadcast", "header", ctx.Header)
+			}
 			go c.processBroadcastLoop(call.subCtx, call)
 		}
 		ctx.Next()
@@ -217,14 +222,23 @@ func MwLocal(c *Client) HandlerFunc {
 		}
 
 		if isUnicastLocal {
+			if ctx.Header.Flags.IsDebug() {
+				slog.DebugContext(ctx.Ctx, "MwLocal runLocal", "header", ctx.Header)
+			}
 			runLocal()  // 同步执行，避免并发问题,如果异步，并发问题发生在调用后对err的赋值，前面兜底那，又在读err。读写同时发生了
 			ctx.Abort() // 这里没有指定错误，因此不会走到兜底逻辑
 			return
 		}
-		if h.Flags.IsBroadcast() && hasLocalModule {
-			h.Flags.Add(headerflags.ExcludeSender)
-			//NOTE: 有一个风险，本地没执行完成，远端返回一个EOS，本地的就会被丢弃掉
-			go runLocal() //异步的目的是希望本地与远程同时发生
+		if h.Flags.IsBroadcast() {
+			if hasLocalModule {
+				h.Flags.Add(headerflags.ExcludeSender)
+				if ctx.Header.Flags.IsDebug() {
+					slog.DebugContext(ctx.Ctx, "MwLocal broadcast", "header", ctx.Header)
+				}
+				go runLocal() //异步的目的是希望本地与远程同时发生
+			} else {
+				ctx.Call.localStop.Store(true) //无本地调用默认成功
+			}
 		}
 		ctx.Next()
 	}
@@ -235,6 +249,9 @@ func MwCodec(c *Client) HandlerFunc {
 	return func(ctx *Context) {
 		if ctx.IsAborted() {
 			return
+		}
+		if ctx.Header.Flags.IsDebug() {
+			slog.DebugContext(ctx.Ctx, "MwCodec", "header", ctx.Header)
 		}
 		var err error
 		ctx.BodyBytes, err = coder.Marshal(ctx.Header.ReqCoderT, ctx.Args)
@@ -260,6 +277,9 @@ func MwTransport(c *Client) HandlerFunc {
 	return func(ctx *Context) {
 		if ctx.IsAborted() {
 			return
+		}
+		if ctx.Header.Flags.IsDebug() {
+			slog.DebugContext(ctx.Ctx, "MwTransport", "header", ctx.Header)
 		}
 		call := ctx.Call
 		seq := ctx.Seq

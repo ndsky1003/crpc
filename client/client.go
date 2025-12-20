@@ -135,9 +135,7 @@ func (c *Client) executeChain(ctx context.Context, callType headertype.T, servic
 	return mCtx.Call
 }
 
-// 广播消费循环
-// 这里的回调最后一个参数一定是false
-func (c *Client) dispatchBroadcast(call *Call, res *broadcastResult) bool {
+func (c *Client) dispatchBroadcast(call *Call, res *broadcastResult, isEOS bool) bool {
 	if call.BroadcastResNewFunc == nil || call.BroadcastResCallBack == nil {
 		return false
 	}
@@ -163,22 +161,12 @@ func (c *Client) dispatchBroadcast(call *Call, res *broadcastResult) bool {
 		if res.code.IsOK() {
 			reply = call.BroadcastResNewFunc()
 			if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
-				tmpErr := errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
-				if call.ctx != nil {
-					call.ctx.invokeHooks(nil, tmpErr)
-				}
-				call.BroadcastResCallBack(nil, tmpErr, false)
-				return false
+				resErr = errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
 			}
 		} else {
 			tmpErr := &errors.Error{}
 			if err := coder.Unmarshal(res.resCoderT, res.rawBody, tmpErr); err != nil {
-				tmpErr := errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
-				if call.ctx != nil {
-					call.ctx.invokeHooks(nil, tmpErr)
-				}
-				call.BroadcastResCallBack(nil, tmpErr, false)
-				return false
+				resErr = errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
 			}
 			if tmpErr.Code != errors.None {
 				resErr = tmpErr
@@ -189,7 +177,7 @@ func (c *Client) dispatchBroadcast(call *Call, res *broadcastResult) bool {
 	if call.ctx != nil {
 		call.ctx.invokeHooks(reply, resErr)
 	}
-	return call.BroadcastResCallBack(reply, resErr, false)
+	return call.BroadcastResCallBack(reply, resErr, isEOS)
 }
 
 func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
@@ -211,15 +199,12 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 					if !ok {
 						return
 					}
-					call.fixStop(res)
+					isEOS := call.fixStop(res)
 					// 处理残留消息,也就是最后一条消息无法确定select选中上面，还是下面
-					if !c.dispatchBroadcast(call, res) {
+					if !c.dispatchBroadcast(call, res, isEOS) {
 						return
 					}
-					if call.localStop.Load() && call.normalStop.Load() {
-						if f := call.BroadcastResCallBack; f != nil {
-							f(nil, nil, true)
-						}
+					if isEOS {
 						return
 					}
 				default:
@@ -245,14 +230,11 @@ func (c *Client) processBroadcastLoop(ctx context.Context, call *Call) {
 			if !ok {
 				return
 			}
-			call.fixStop(res)
-			if !c.dispatchBroadcast(call, res) {
+			isEOS := call.fixStop(res)
+			if !c.dispatchBroadcast(call, res, isEOS) {
 				return
 			}
-			if call.localStop.Load() && call.normalStop.Load() {
-				if f := call.BroadcastResCallBack; f != nil {
-					f(nil, nil, true)
-				}
+			if isEOS {
 				return
 			}
 		}

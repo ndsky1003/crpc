@@ -177,8 +177,14 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 
 func (s *server_mgr) route(sess server.Session, h *header.Header, data, meta, body []byte) error {
 	if h.Type.IsReq() {
+		if h.Flags.IsDebug() {
+			slog.Debug("handleReq", "header", h, "trace_id", h.TraceID)
+		}
 		return s.handleReq(sess, h, data)
 	} else {
+		if h.Flags.IsDebug() {
+			slog.Debug("handleRes", "header", h, "trace_id", h.TraceID)
+		}
 		return s.handleRes(sess, h, data, meta, body)
 	}
 }

@@ -13,6 +13,7 @@ var pool = buffer.NewBytePool(
 )
 
 func Release(b []byte) {
+	clear(b)
 	pool.Put(b)
 }
 
