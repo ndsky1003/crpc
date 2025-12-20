@@ -59,7 +59,7 @@ func New(ctx context.Context, name string, addr string, opts ...*Option) (c *Cli
 		return nil, errors.New(errors.ClientInvalidArgs, "address is required")
 	}
 
-	if opt.Secret == nil {
+	if s := opt.Secret; s == nil || *s == "" {
 		return nil, errors.New(errors.ClientInvalidArgs, "secret is required")
 	}
 

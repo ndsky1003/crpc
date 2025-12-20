@@ -165,7 +165,7 @@ func (s *MyStructService) CtxMetaReq(ctx context.Context, meta *dto.Meta, req *d
 // ==========================================
 func main() {
 	// 1. 初始化 Client
-	c, err := client.Dial(context.Background(), "client3", ":8080")
+	c, err := client.Dial(context.Background(), "client3", ":8080", client.Options().SetSecret("ddddd"))
 	if err != nil {
 		fmt.Println("dial error:", err)
 		return

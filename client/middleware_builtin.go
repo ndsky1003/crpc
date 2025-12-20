@@ -67,8 +67,10 @@ func MwHeader(c *Client) HandlerFunc {
 			SetMethod(ctx.Func).
 			SetSeq(ctx.Seq)
 
-		if tid := ctx.MergedOpt.GenTraceID(ctx.Ctx); tid != "" {
-			h.SetTraceID(tid)
+		if f := ctx.MergedOpt.GenTraceID; f != nil {
+			if tid := f(ctx.Ctx); tid != "" {
+				h.SetTraceID(tid)
+			}
 		}
 		if s := opt.HashKey; s != nil {
 			h.SetHashKey(*s)
