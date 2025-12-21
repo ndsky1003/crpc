@@ -21,4 +21,4 @@ require (
 	golang.org/x/sync v0.19.0 // indirect
 )
 
-// replace github.com/ndsky1003/net/v2 => ../../self-pkg/net/
+replace github.com/ndsky1003/net/v2 => ../../self-pkg/net/

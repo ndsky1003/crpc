@@ -184,7 +184,7 @@ func main() {
 		fmt.Println("dial error:", err)
 		return
 	}
-	comm.Default_lient = c
+	comm.Default_Client = c
 	fmt.Println("Client started...")
 
 	// 2. 实例化服务对象

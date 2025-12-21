@@ -98,6 +98,7 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 			if now >= h.Deadline { //超时
 				netpool.Release(data)
 				defer h.Release()
+				slog.Warn("收到的请求消息已经超时", "header", h, "data", data)
 				if h.Type == headertype.Req {
 					if h.Flags.IsBroadcast() {
 						h.Flags.With(headerflags.EOS)
@@ -114,13 +115,17 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 	task := func() {
 		defer netpool.Release(data)
 		defer h.Release()
+		slog.Info("ProcessMessage", "header", h, "data_len", len(data), "data", data, "meta", meta, "body", body)
+
 		// 1. 获取 Context
 		handlers := make(HandlersChain, 0, len(s.handlers)+1)
 		if len(s.handlers) > 0 {
 			handlers = append(handlers, s.handlers...)
 		}
+		var wg sync.WaitGroup
 		ctx := &Context{
 			Sess:     sess,
+			wg:       &wg,
 			Header:   h, //一个池化对象，放到了一个非池化的身上,现在的环境下，生命周期是一样的，所以不存在问题
 			Data:     data,
 			index:    -1,
@@ -130,7 +135,7 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 
 		finalHandler := func(c *Context) {
 			// 调用原有的 route 逻辑
-			err := s.route(c.Sess, c.Header, c.Data, meta, body)
+			err := s.route(c.Sess, c.Header, c.Data, meta, body, ctx.wg)
 			c.SetError(err)
 		}
 
@@ -138,6 +143,8 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 
 		// 5. 执行
 		ctx.Next()
+
+		wg.Wait()
 
 		switch h.Type {
 		case headertype.Req:
@@ -175,21 +182,21 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 	return nil
 }
 
-func (s *server_mgr) route(sess server.Session, h *header.Header, data, meta, body []byte) error {
+func (s *server_mgr) route(sess server.Session, h *header.Header, data, meta, body []byte, wg *sync.WaitGroup) error {
 	if h.Type.IsReq() {
 		if h.Flags.IsDebug() {
 			slog.Debug("handleReq", "header", h, "trace_id", h.TraceID)
 		}
-		return s.handleReq(sess, h, data)
+		return s.handleReq(sess, h, data, wg)
 	} else {
 		if h.Flags.IsDebug() {
 			slog.Debug("handleRes", "header", h, "trace_id", h.TraceID)
 		}
-		return s.handleRes(sess, h, data, meta, body)
+		return s.handleRes(sess, h, data, meta, body, wg)
 	}
 }
 
-func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byte) error {
+func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byte, wg *sync.WaitGroup) error {
 	val, ok := s.services.Load(h.ToService)
 	if !ok {
 		if h.Flags.IsBroadcast() {
@@ -268,7 +275,9 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byt
 			}
 			task := func() {
 				if err := target.Send(context.Background(), data, server.Options().WithConn(func(o *conn.Option) {
-					o.SetWriteTimeout(timeout)
+					o.SetWriteTimeout(timeout).SetSendDeferFn(func() {
+						wg.Done()
+					})
 				})); err != nil {
 					handleFailure(err)
 				}
@@ -280,6 +289,8 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byt
 					err = errors.New(errors.ServerInternal, err.Error())
 				}
 				handleFailure(err)
+			} else {
+				wg.Add(1)
 			}
 		}
 		return nil
@@ -299,10 +310,11 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byt
 	if target == nil {
 		return errors.New(errors.ServerDeadlineExceeded, "no available service instance")
 	}
-	return s.forward(target.Session, data, timeout)
+	slog.Info("handleReq", "header", h, "data_len", len(data), "data", data, "timeout", timeout)
+	return s.forward(target.Session, data, timeout, wg)
 }
 
-func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, body []byte) error {
+func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, body []byte, wg *sync.WaitGroup) error {
 	timeout := *s.opt.SendTimeout
 	tosid := h.UUID
 	target, ok := s.connCache.Load(tosid)
@@ -326,21 +338,30 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, b
 		if err != nil {
 			return err
 		}
-		return s.forwards(targetSess, packet, timeout)
+		//不需要同步，因为是新打的packet
+		return s.forwards(targetSess, packet, timeout, nil)
 	}
-	return s.forward(targetSess, data, timeout)
+	return s.forward(targetSess, data, timeout, wg)
 }
 
-func (s *server_mgr) forward(sess server.Session, data []byte, timeout time.Duration) error {
-	return sess.Send(context.Background(), data, server.Options().WithConn(func(o *conn.Option) {
-		o.SetWriteTimeout(timeout)
-	}))
+func (s *server_mgr) forward(sess server.Session, data []byte, timeout time.Duration, wg *sync.WaitGroup) error {
+	return s.forwards(sess, [][]byte{data}, timeout, wg)
 }
 
-func (s *server_mgr) forwards(sess server.Session, data [][]byte, timeout time.Duration) error {
-	return sess.Sends(context.Background(), data, server.Options().WithConn(func(o *conn.Option) {
+// wg 存在与否决定是否同步发送
+func (s *server_mgr) forwards(sess server.Session, data [][]byte, timeout time.Duration, wg *sync.WaitGroup) error {
+	f := func(o *conn.Option) {
 		o.SetWriteTimeout(timeout)
-	}))
+	}
+	if wg != nil {
+		wg.Add(1)
+		f = func(o *conn.Option) {
+			o.SetWriteTimeout(timeout).SetSendDeferFn(func() {
+				wg.Done()
+			})
+		}
+	}
+	return sess.Sends(context.Background(), data, server.Options().WithConn(f))
 }
 
 func (s *server_mgr) replyError(srcSess server.Session, h *header.Header, rpcErr error) error {

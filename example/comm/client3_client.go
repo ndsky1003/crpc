@@ -23,7 +23,7 @@ func CtxMetaReq(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*clie
 	var resPtr any = nil
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxMetaReq", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxMetaReq", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	// 即使原方法无返回值，生成的 Client 也会返回 error
@@ -45,7 +45,7 @@ func CtxMetaReqErr(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*c
 	var resPtr any = nil
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxMetaReqErr", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxMetaReqErr", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	// 即使原方法无返回值，生成的 Client 也会返回 error
@@ -68,7 +68,7 @@ func CtxMetaReqRes(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*c
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxMetaReqRes", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxMetaReqRes", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -90,7 +90,7 @@ func CtxMetaReqResErr(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ..
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxMetaReqResErr", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxMetaReqResErr", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -110,7 +110,7 @@ func CtxOnly(ctx context.Context, opts ...*client.Option) error {
 	var resPtr any = nil
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxOnly", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxOnly", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	// 即使原方法无返回值，生成的 Client 也会返回 error
@@ -131,7 +131,7 @@ func CtxOnlyErr(ctx context.Context, opts ...*client.Option) error {
 	var resPtr any = nil
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxOnlyErr", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxOnlyErr", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	// 即使原方法无返回值，生成的 Client 也会返回 error
@@ -153,7 +153,7 @@ func CtxOnlyRes(ctx context.Context, opts ...*client.Option) (*dto.Res, error) {
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxOnlyRes", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxOnlyRes", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -174,7 +174,7 @@ func CtxOnlyResErr(ctx context.Context, opts ...*client.Option) (*dto.Res, error
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxOnlyResErr", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxOnlyResErr", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -195,7 +195,7 @@ func CtxReqPtr(ctx context.Context, req *dto.Req, opts ...*client.Option) (*dto.
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxReqPtr", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxReqPtr", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -216,7 +216,7 @@ func CtxReqVal(ctx context.Context, req string, opts ...*client.Option) (string,
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.CtxReqVal", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.CtxReqVal", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return res, err
@@ -237,7 +237,7 @@ func Empty(opts ...*client.Option) error {
 	var resPtr any = nil
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.Empty", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.Empty", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	// 即使原方法无返回值，生成的 Client 也会返回 error
@@ -259,7 +259,7 @@ func ErrOnly(req *dto.Req, opts ...*client.Option) error {
 	var resPtr any = nil
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.ErrOnly", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.ErrOnly", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	// 即使原方法无返回值，生成的 Client 也会返回 error
@@ -282,7 +282,7 @@ func Full(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.Opt
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.Full", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.Full", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -301,7 +301,7 @@ func Full_Go(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*client.
 	// 2. 根据 CallType 分发调用
 	// Go 模式：异步调用，返回 Call 对象
 	var res dto.Res
-	return Default_lient.Go(ctx, "client3", "MyService.Full", reqBody, &res, opts...)
+	return Default_Client.Go(ctx, "client3", "MyService.Full", reqBody, &res, opts...)
 }
 
 // Full_Send invokes client3.MyService.Full
@@ -316,7 +316,7 @@ func Full_Send(ctx context.Context, meta *dto.Meta, req *dto.Req, opts ...*clien
 
 	// 2. 根据 CallType 分发调用
 	// Send 模式：单向发送
-	return Default_lient.Send(ctx, "client3", "MyService.Full", reqBody, opts...)
+	return Default_Client.Send(ctx, "client3", "MyService.Full", reqBody, opts...)
 }
 
 // MetaReq invokes client3.MyService.MetaReq
@@ -336,7 +336,7 @@ func MetaReq(meta *dto.Meta, req *dto.Req, opts ...*client.Option) (*dto.Res, er
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.MetaReq", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.MetaReq", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -357,7 +357,7 @@ func NoParamsErr(opts ...*client.Option) error {
 	var resPtr any = nil
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.NoParamsErr", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.NoParamsErr", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	// 即使原方法无返回值，生成的 Client 也会返回 error
@@ -380,7 +380,7 @@ func NoParamsRes(opts ...*client.Option) (*dto.Res, error) {
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.NoParamsRes", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.NoParamsRes", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -402,7 +402,7 @@ func NoParamsResErr(opts ...*client.Option) (*dto.Res, error) {
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.NoParamsResErr", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.NoParamsResErr", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -423,7 +423,7 @@ func NoReturn(req *dto.Req, opts ...*client.Option) error {
 	var resPtr any = nil
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.NoReturn", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.NoReturn", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	// 即使原方法无返回值，生成的 Client 也会返回 error
@@ -446,7 +446,7 @@ func ReqOnly(req *dto.Req, opts ...*client.Option) (*dto.Res, error) {
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.ReqOnly", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.ReqOnly", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err
@@ -468,7 +468,7 @@ func ResOnly(req *dto.Req, opts ...*client.Option) (*dto.Res, error) {
 	var resPtr any = &res
 
 	// 【修正】强制捕获 error
-	err := Default_lient.Call(ctx, "client3", "MyService.ResOnly", reqBody, resPtr, opts...)
+	err := Default_Client.Call(ctx, "client3", "MyService.ResOnly", reqBody, resPtr, opts...)
 
 	// 3. 处理返回值
 	return &res, err

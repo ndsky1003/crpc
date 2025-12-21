@@ -4,6 +4,7 @@ package server
 import (
 	"maps"
 	"math"
+	"sync"
 
 	"github.com/ndsky1003/crpc/v3/protocol/header"
 	"github.com/ndsky1003/net/v2/server"
@@ -16,6 +17,7 @@ type HandlersChain []HandlerFunc
 type Context struct {
 	Sess server.Session
 
+	wg *sync.WaitGroup
 	// 原始数据信息
 	Header *header.Header //这个是池化的
 	Data   []byte         //整体的数据

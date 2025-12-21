@@ -104,6 +104,8 @@ func (this *Client) onConnected(c *conn.Conn) error {
 }
 
 func (c *Client) HandleMsg(data []byte) error {
+
+	slog.Info("HandleMsg", "data", data)
 	h, meta, body, err := protocol.Unpack(data)
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())

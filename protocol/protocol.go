@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/ndsky1003/crpc/v3/protocol/header"
 )
@@ -61,6 +62,7 @@ func Unpack(data []byte) (*header.Header, []byte, []byte, error) {
 		return nil, nil, nil, ErrPacketTooShort
 	}
 
+	slog.Info("msg", "msg", string(data), "data", data)
 	// 1. 校验魔数
 	magic := binary.BigEndian.Uint16(data[0:2])
 	if magic != MagicNumber {

@@ -10,8 +10,6 @@ github.com/ndsky1003/buffer/v2 v2.0.0 h1:NY8/YYRWb90DkrUEq/MHgjw6k9Y1A1ysHKjFN99
 github.com/ndsky1003/buffer/v2 v2.0.0/go.mod h1:e5uUna8MXOvNueY38RJh6zh5XBhfdLHaLoqqs+g7qGQ=
 github.com/ndsky1003/log v1.0.0 h1:nk9e16O7/UMfh/VAruW12MI5hZGQ/+ps64tbLNsz5uI=
 github.com/ndsky1003/log v1.0.0/go.mod h1:6/kdEoRiQdMlckHZBhCrfmxHn0Who+5ExqM7Pr6xu34=
-github.com/ndsky1003/net/v2 v2.0.0 h1:5JhU2XbMMiN084bVIPMVgeMTd/8f1ckWgjqEg0aCuls=
-github.com/ndsky1003/net/v2 v2.0.0/go.mod h1:E1oOIBZyCjX7iXSSxGAl2j1tIvKoNeAWrxaPrtvf+Io=
 github.com/panjf2000/ants/v2 v2.11.3 h1:AfI0ngBoXJmYOpDh9m516vjqoUu2sLrIVgppI9TZVpg=
 github.com/panjf2000/ants/v2 v2.11.3/go.mod h1:8u92CYMUc6gyvTIw8Ru7Mt7+/ESnJahz5EVtqfrilek=
 github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=
