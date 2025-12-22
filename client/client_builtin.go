@@ -195,7 +195,12 @@ func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) e
 			}
 		}
 		call := val.(*Call)
-		d := &broadcastResult{rawBody: body, resCoderT: h.ResCoderT, code: h.Code, IsEOS: h.Flags.IsEOS()}
+		c_body := make([]byte, len(body))
+		copy(c_body, body)
+		d := &broadcastResult{rawBody: c_body, resCoderT: h.ResCoderT, code: h.Code, IsEOS: h.Flags.IsEOS()}
+		if h.Flags.IsDebug() {
+			slog.DebugContext(ctx, "broadcast receive", "data", d)
+		}
 		call.trySendBroadcastResult(d)
 	} else {
 		val, ok := c.pending.LoadAndDelete(seq)

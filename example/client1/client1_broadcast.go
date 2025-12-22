@@ -110,8 +110,9 @@ func (s *BroadcastService) SimpleBroadcast(ctx context.Context, req *BroadcastRe
 	broadcastStats.TotalBroadcasts++
 	broadcastStats.LastBroadcast = time.Now()
 	broadcastStats.Unlock()
+	slog.Info("ddd", "dd", "dd")
 
-	// // fmt.Printf("[SimpleBroadcast] 收到广播: %s from %s\n", req.Message, req.From)
+	fmt.Printf("[SimpleBroadcast] 收到广播: %s from %s\n", req.Message, req.From)
 
 	return &BroadcastRes{
 		ServerName: "client1_broadcast",

@@ -336,8 +336,8 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, b
 		if err != nil {
 			return err
 		}
-		//不需要同步，因为是新打的packet
-		return s.forwards(targetSess, packet, timeout, nil)
+		//不需要同步，因为是新打的packet,packet 底层还是body,所以要传递wg
+		return s.forwards(targetSess, packet, timeout, wg)
 	}
 	return s.forward(targetSess, data, timeout, wg)
 }

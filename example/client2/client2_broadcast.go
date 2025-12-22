@@ -42,11 +42,12 @@ type broadcastResultCollector struct {
 }
 
 func main() {
-	log.SetDefault(log.Options().SetExtractorAttr(func(ctx context.Context, r *slog.Record) {
+	hander := log.SetDefault(log.Options().SetExtractorAttr(func(ctx context.Context, r *slog.Record) {
 		if tid := trace.ExtractorTraceID(ctx); tid != "" {
 			r.Add("trace_id", tid)
 		}
 	}).SetAddSource(true))
+	hander.SetLevel(log.LevelDebug)
 
 	var err error
 	c, err = client.Dial(context.Background(), "client2_broadcast", ":8080",
@@ -167,15 +168,17 @@ func testSimpleBroadcast() {
 
 	// 调用广播 - 方法名格式: 服务名.方法名
 	ctx := context.Background()
-	err := c.Call(ctx, "BroadcastService", "BroadcastService.SimpleBroadcast", req, nil,
+	err := c.Call(ctx, "client1_broadcast", "BroadcastService.SimpleBroadcast", req, nil,
 		client.Options().
 			SetBroadcast().                        // 启用广播
 			SetMeta(&dto.Meta{Source: "client2"}). // 设置元数据
 			SetBroadcastChanCap(10).               // 广播结果通道容量
+			SetDebug(true).
 			SetMetaCoderT(coder.Msgp).
 			SetReqCoderT(coder.Msgp).
 			SetResCoderT(coder.Msgp).
 			SetBroadcastResNewFunc(func() any { // 创建响应对象的函数
+				fmt.Print("dddddddddddddddddd")
 				return &BroadcastRes{}
 			}).
 			SetBroadcastResCallBack(func(ret any, err error, eos bool) bool { // 广播结果回调
@@ -229,7 +232,7 @@ func testTimeBroadcast() {
 	collector := &broadcastResultCollector{}
 
 	ctx := context.Background()
-	err := c.Call(ctx, "BroadcastService", "BroadcastService.TimeBroadcast", req, nil,
+	err := c.Call(ctx, "client1_broadcast", "BroadcastService.TimeBroadcast", req, nil,
 		client.Options().
 			SetBroadcast().
 			SetMeta(&dto.Meta{Source: "client2"}).
@@ -301,7 +304,7 @@ func testStatsBroadcast() {
 	collector := &broadcastResultCollector{}
 
 	ctx := context.Background()
-	err := c.Call(ctx, "BroadcastService", "BroadcastService.StatsBroadcast", req, nil,
+	err := c.Call(ctx, "client1_broadcast", "BroadcastService.StatsBroadcast", req, nil,
 		client.Options().
 			SetBroadcast().
 			SetMeta(&dto.Meta{Source: "client2"}).
@@ -357,7 +360,7 @@ func testComputeBroadcast() {
 	collector := &broadcastResultCollector{}
 
 	ctx := context.Background()
-	err := c.Call(ctx, "BroadcastService", "BroadcastService.ComputeBroadcast", req, nil,
+	err := c.Call(ctx, "client1_broadcast", "BroadcastService.ComputeBroadcast", req, nil,
 		client.Options().
 			SetBroadcast().
 			SetMeta(&dto.Meta{Source: "client2"}).
@@ -415,7 +418,7 @@ func testNotifyBroadcast() {
 	collector := &broadcastResultCollector{}
 
 	ctx := context.Background()
-	err := c.Call(ctx, "BroadcastService", "BroadcastService.NotifyBroadcast", req, nil,
+	err := c.Call(ctx, "client1_broadcast", "BroadcastService.NotifyBroadcast", req, nil,
 		client.Options().
 			SetBroadcast().
 			SetMeta(&dto.Meta{Source: "client2"}).
@@ -474,7 +477,7 @@ func testContinuousBroadcast() {
 		collector := &broadcastResultCollector{}
 
 		ctx := context.Background()
-		err := c.Call(ctx, "BroadcastService", "BroadcastService.SimpleBroadcast", req, nil,
+		err := c.Call(ctx, "client1_broadcast", "BroadcastService.SimpleBroadcast", req, nil,
 			client.Options().
 				SetBroadcast().
 				SetMeta(&dto.Meta{Source: "client2"}).

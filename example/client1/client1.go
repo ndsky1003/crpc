@@ -18,7 +18,7 @@ type Meta struct {
 	Source string
 }
 
-func main() {
+func main1() {
 	// 假设服务端监听在 :8080
 	c, err := client.Dial(context.Background(), "client1", ":8080")
 	if err != nil {

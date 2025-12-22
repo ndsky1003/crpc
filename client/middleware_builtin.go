@@ -254,6 +254,9 @@ func MwCodec(c *Client) HandlerFunc {
 			slog.DebugContext(ctx.Ctx, "MwCodec", "header", ctx.Header)
 		}
 		var err error
+		if ctx.Header.Flags.IsDebug() {
+			slog.DebugContext(ctx.Ctx, "body Marshal", "reqcodert", ctx.Header.ReqCoderT)
+		}
 		ctx.BodyBytes, err = coder.Marshal(ctx.Header.ReqCoderT, ctx.Args)
 		if err != nil {
 			ctx.AbortWithError(errors.New(errors.ClientInternal, err.Error()))
@@ -261,6 +264,9 @@ func MwCodec(c *Client) HandlerFunc {
 			return
 		}
 		if ctx.MergedOpt.Meta != nil {
+			if ctx.Header.Flags.IsDebug() {
+				slog.DebugContext(ctx.Ctx, "meta Marshal", "meta coder t", ctx.Header.MetaCoderT)
+			}
 			ctx.MetaBytes, err = coder.Marshal(ctx.Header.MetaCoderT, ctx.MergedOpt.Meta)
 			if err != nil {
 				ctx.AbortWithError(errors.New(errors.ClientInternal, err.Error()))

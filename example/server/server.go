@@ -16,7 +16,7 @@ func main() {
 		if tid := trace.ExtractorTraceID(ctx); tid != "" {
 			r.Add("trace_id", tid)
 		}
-	}).SetAddSource(true))
+	}).SetAddSource(true).SetLevel(log.LevelDebug))
 	s, err := server.New(context.Background(), server.Options().SetSecret("ddddd"))
 	if err != nil {
 		slog.Error("e", "err", err)
