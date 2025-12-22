@@ -1,5 +1,5 @@
 //go:generate gencrpcserverv3
-//go:generate gencrpcclientv3 --out_dir ../comm --package comm --client Default_lient --service client3 --module  MyService
+//go:generate gencrpcclientv3 --out_dir ../comm --package comm --client Default_Client --service client3 --module  MyService
 package main
 
 import (
@@ -25,7 +25,7 @@ type MyStructService struct{}
 // -------------------------------------------------------
 // @crpc:CallType:Call,Send,Go
 func (s *MyStructService) Full(ctx context.Context, meta *dto.Meta, req *dto.Req) (*dto.Res, error) {
-	fmt.Printf("[Struct] Full Called: Meta=%v, Req=%v\n", meta, req)
+	// 	fmt.Printf("[Struct] Full Called: Meta=%v, Req=%v\n", meta, req)
 	return &dto.Res{Msg: "OK from Struct.Full"}, nil
 }
 
@@ -34,13 +34,13 @@ func (s *MyStructService) Full(ctx context.Context, meta *dto.Meta, req *dto.Req
 // -------------------------------------------------------
 // 指针类型
 func (s *MyStructService) CtxReqPtr(ctx context.Context, req *dto.Req) (*dto.Res, error) {
-	fmt.Printf("[Struct] CtxReqPtr Called: Req=%v\n", req)
+	// 	fmt.Printf("[Struct] CtxReqPtr Called: Req=%v\n", req)
 	return &dto.Res{Msg: "OK from Struct.CtxReqPtr"}, nil
 }
 
 // 值类型 (Req/Res 为 string)
 func (s *MyStructService) CtxReqVal(ctx context.Context, req string) (string, error) {
-	fmt.Printf("[Struct] CtxReqVal Called: Req=%s\n", req)
+	// 	fmt.Printf("[Struct] CtxReqVal Called: Req=%s\n", req)
 	return "Struct.CtxReqVal:" + req, nil
 }
 
@@ -49,7 +49,7 @@ func (s *MyStructService) CtxReqVal(ctx context.Context, req string) (string, er
 // -------------------------------------------------------
 // (Meta, Req) -> (Res, error)
 func (s *MyStructService) MetaReq(meta *dto.Meta, req *dto.Req) (*dto.Res, error) {
-	fmt.Printf("[Struct] MetaReq Called: Meta=%v, Req=%v\n", meta, req)
+	// 	fmt.Printf("[Struct] MetaReq Called: Meta=%v, Req=%v\n", meta, req)
 	return &dto.Res{Msg: "OK from Struct.MetaReq"}, nil
 }
 
@@ -58,7 +58,7 @@ func (s *MyStructService) MetaReq(meta *dto.Meta, req *dto.Req) (*dto.Res, error
 // -------------------------------------------------------
 // (Req) -> (Res, error)
 func (s *MyStructService) ReqOnly(req *dto.Req) (*dto.Res, error) {
-	fmt.Printf("[Struct] ReqOnly Called: Req=%v\n", req)
+	// 	fmt.Printf("[Struct] ReqOnly Called: Req=%v\n", req)
 	return &dto.Res{Msg: "OK from Struct.ReqOnly"}, nil
 }
 
@@ -68,19 +68,19 @@ func (s *MyStructService) ReqOnly(req *dto.Req) (*dto.Res, error) {
 // 只返回结果: (Req) -> (Res)
 // 注意：如果发生错误框架层无法捕获，仅用于必定成功的逻辑
 func (s *MyStructService) ResOnly(req *dto.Req) *dto.Res {
-	fmt.Printf("[Struct] ResOnly Called: Req=%v,%p\n", req, req)
+	// 	fmt.Printf("[Struct] ResOnly Called: Req=%v,%p\n", req, req)
 	return &dto.Res{Msg: "OK from Struct.ResOnly"}
 }
 
 // 只返回错误: (Req) -> (error)
 func (s *MyStructService) ErrOnly(req *dto.Req) error {
-	fmt.Printf("[Struct] ErrOnly Called: Req=%v\n", req)
+	// 	fmt.Printf("[Struct] ErrOnly Called: Req=%v\n", req)
 	return nil
 }
 
 // 无返回值: (Req) -> ()
 func (s *MyStructService) NoReturn(req *dto.Req) {
-	fmt.Printf("[Struct] NoReturn Called: Req=%v\n", req)
+	// fmt.Printf("[Struct] NoReturn Called: Req=%v\n", req)
 }
 
 // -------------------------------------------------------
@@ -88,12 +88,12 @@ func (s *MyStructService) NoReturn(req *dto.Req) {
 // -------------------------------------------------------
 // 无参无返: () -> ()
 func (s *MyStructService) Empty() {
-	fmt.Println("[Struct] Empty Called")
+	// fmt.Println("[Struct] Empty Called")
 }
 
 // 仅 Context: (Ctx) -> ()
 func (s *MyStructService) CtxOnly(ctx context.Context) {
-	fmt.Println("[Struct] CtxOnly Called")
+	// fmt.Println("[Struct] CtxOnly Called")
 }
 
 // -------------------------------------------------------
@@ -102,37 +102,37 @@ func (s *MyStructService) CtxOnly(ctx context.Context) {
 
 // (Ctx) -> (Res, error)
 func (s *MyStructService) CtxOnlyResErr(ctx context.Context) (*dto.Res, error) {
-	fmt.Println("[Struct] CtxOnlyResErr Called")
+	// 	fmt.Println("[Struct] CtxOnlyResErr Called")
 	return &dto.Res{Msg: "OK from Struct.CtxOnlyResErr"}, nil
 }
 
 // (Ctx) -> (Res)
 func (s *MyStructService) CtxOnlyRes(ctx context.Context) *dto.Res {
-	fmt.Println("[Struct] CtxOnlyRes Called")
+	// 	fmt.Println("[Struct] CtxOnlyRes Called")
 	return &dto.Res{Msg: "OK from Struct.CtxOnlyRes"}
 }
 
 // (Ctx) -> (error)
 func (s *MyStructService) CtxOnlyErr(ctx context.Context) error {
-	fmt.Println("[Struct] CtxOnlyErr Called")
+	// 	fmt.Println("[Struct] CtxOnlyErr Called")
 	return nil
 }
 
 // () -> (Res, error)
 func (s *MyStructService) NoParamsResErr() (*dto.Res, error) {
-	fmt.Println("[Struct] NoParamsResErr Called")
+	// 	fmt.Println("[Struct] NoParamsResErr Called")
 	return &dto.Res{Msg: "OK from Struct.NoParamsResErr"}, nil
 }
 
 // () -> (Res)
 func (s *MyStructService) NoParamsRes() *dto.Res {
-	fmt.Println("[Struct] NoParamsRes Called")
+	// 	fmt.Println("[Struct] NoParamsRes Called")
 	return &dto.Res{Msg: "OK from Struct.NoParamsRes"}
 }
 
 // () -> (error)
 func (s *MyStructService) NoParamsErr() error {
-	fmt.Println("[Struct] NoParamsErr Called")
+	// 	fmt.Println("[Struct] NoParamsErr Called")
 	return nil
 }
 
@@ -142,31 +142,31 @@ func (s *MyStructService) NoParamsErr() error {
 
 // (Ctx, Meta, Req) -> (Res, error)
 func (s *MyStructService) CtxMetaReqResErr(ctx context.Context, meta *dto.Meta, req *dto.Req) (*dto.Res, error) {
-	fmt.Printf("[Struct] CtxMetaReqResErr Called: Meta=%v, Req=%v\n", meta, req)
+	// 	fmt.Printf("[Struct] CtxMetaReqResErr Called: Meta=%v, Req=%v\n", meta, req)
 	return &dto.Res{Msg: "OK from Struct.CtxMetaReqResErr"}, nil
 }
 
 // (Ctx, Meta, Req) -> (Res)
 func (s *MyStructService) CtxMetaReqRes(ctx context.Context, meta *dto.Meta, req *dto.Req) *dto.Res {
-	fmt.Printf("[Struct] CtxMetaReqRes Called: Meta=%v, Req=%v\n", meta, req)
+	// 	fmt.Printf("[Struct] CtxMetaReqRes Called: Meta=%v, Req=%v\n", meta, req)
 	return &dto.Res{Msg: "OK from Struct.CtxMetaReqRes"}
 }
 
 // (Ctx, Meta, Req) -> (error)
 func (s *MyStructService) CtxMetaReqErr(ctx context.Context, meta *dto.Meta, req *dto.Req) error {
-	fmt.Printf("[Struct] CtxMetaReqErr Called: Meta=%v, Req=%v\n", meta, req)
+	// 	fmt.Printf("[Struct] CtxMetaReqErr Called: Meta=%v, Req=%v\n", meta, req)
 	return nil
 }
 
 // (Ctx, Meta, Req) -> ()
 func (s *MyStructService) CtxMetaReq(ctx context.Context, meta *dto.Meta, req *dto.Req) {
-	fmt.Printf("[Struct] CtxMetaReq Called: Meta=%v, Req=%v\n", meta, req)
+	// fmt.Printf("[Struct] CtxMetaReq Called: Meta=%v, Req=%v\n", meta, req)
 }
 
 // ==========================================
 // 3. Main 测试入口
 // ==========================================
-func main() {
+func main1() {
 	log.SetDefault(log.Options().SetExtractorAttr(func(ctx context.Context, r *slog.Record) {
 		if tid := trace.ExtractorTraceID(ctx); tid != "" {
 			r.Add("trace_id", tid)

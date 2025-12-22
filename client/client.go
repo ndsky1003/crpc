@@ -122,6 +122,7 @@ func (c *Client) executeChain(ctx context.Context, callType headertype.T, servic
 			dummyCall.Error = errors.New(errors.ClientCanceled, "request aborted unexpectly")
 		}
 		dummyCall.ctx = mCtx
+		mCtx.Call = dummyCall
 	}
 
 	//兜底逻辑：处理有错误但中间件可能忘记收尾的情况

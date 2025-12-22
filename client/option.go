@@ -128,7 +128,7 @@ func (o *Option) SetDebug(b bool) *Option {
 	return o
 }
 
-func (o *Option) SetBroadcaseResNewFunc(f func() any) *Option {
+func (o *Option) SetBroadcastResNewFunc(f func() any) *Option {
 	if o == nil {
 		return o
 	}
@@ -136,7 +136,7 @@ func (o *Option) SetBroadcaseResNewFunc(f func() any) *Option {
 	return o
 }
 
-func (o *Option) SetBroadcaseResCallBack(f func(any, error, bool) bool) *Option {
+func (o *Option) SetBroadcastResCallBack(f func(any, error, bool) bool) *Option {
 	if o == nil {
 		return o
 	}

@@ -14,7 +14,7 @@ var c *client.Client
 
 func main() {
 	c, _ = client.Dial(context.Background(), "client2", ":8080")
-	comm.Default_lient = c
+	comm.Default_Client = c
 	c.UseByIndex(0, func(c *client.Context) {
 		now := time.Now()
 		c.Next()

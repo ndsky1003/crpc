@@ -74,7 +74,7 @@ func (this *Client) onConnected(c *conn.Conn) error {
 	h.Release()
 
 	// 等待验证响应 -----------------------------------------------
-	data, err := c.Read(conn.Options().SetReadTimeout(time_out))
+	data, err := c.Read()
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
@@ -105,7 +105,6 @@ func (this *Client) onConnected(c *conn.Conn) error {
 
 func (c *Client) HandleMsg(data []byte) error {
 
-	slog.Info("HandleMsg", "data", data)
 	h, meta, body, err := protocol.Unpack(data)
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())

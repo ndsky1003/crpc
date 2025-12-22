@@ -1,3 +1,4 @@
+//go:generate msgp
 package dto
 
 type Req struct {

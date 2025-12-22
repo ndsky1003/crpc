@@ -115,7 +115,6 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 	task := func() {
 		defer netpool.Release(data)
 		defer h.Release()
-		slog.Info("ProcessMessage", "header", h, "data_len", len(data), "data", data, "meta", meta, "body", body)
 
 		// 1. 获取 Context
 		handlers := make(HandlersChain, 0, len(s.handlers)+1)
@@ -310,7 +309,6 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byt
 	if target == nil {
 		return errors.New(errors.ServerDeadlineExceeded, "no available service instance")
 	}
-	slog.Info("handleReq", "header", h, "data_len", len(data), "data", data, "timeout", timeout)
 	return s.forward(target.Session, data, timeout, wg)
 }
 
