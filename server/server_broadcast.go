@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/semaphore"
 )
 
 var itemPool = sync.Pool{
@@ -15,8 +17,10 @@ var itemPool = sync.Pool{
 }
 
 type broadcastCounterItem struct {
-	count atomic.Int32
-	timer *time.Timer
+	count      atomic.Int32
+	totalCount int32 // 记录总数
+	timer      *time.Timer
+	sendSem    *semaphore.Weighted // 用于协调响应发送顺序
 }
 
 type broadcastCounterGroup struct {
@@ -79,6 +83,15 @@ func (s *broadcastCounterAll) setBroadcastCount(sid uuid.UUID, seq uint64, count
 	// 从对象池获取 item
 	item := itemPool.Get().(*broadcastCounterItem)
 	item.count.Store(count)
+	item.totalCount = count
+	// 初始化 semaphore，初始值为 totalCount
+	// 非 EOS handler 获取 1 个槽位，EOS handler 等待获取 totalCount 个槽位
+	if item.sendSem == nil {
+		item.sendSem = semaphore.NewWeighted(int64(count))
+	} else {
+		// 重置 semaphore 权重
+		item.sendSem = semaphore.NewWeighted(int64(count))
+	}
 
 	// 注意：必须先清理旧的 timer（虽然逻辑上不太可能重复 set 同一个 seq，但为了安全）
 	if oldItem, exists := group.items[seq]; exists {
@@ -106,14 +119,15 @@ func (s *broadcastCounterAll) setBroadcastCount(sid uuid.UUID, seq uint64, count
 	})
 }
 
-// decreaseBroadcastCount 减少计数
-func (s *broadcastCounterAll) decreaseBroadcastCount(id uuid.UUID, seq uint64) int32 {
+// decreaseBroadcastCount 减少计数，返回 (剩余数, semaphore)
+// 非 EOS 返回 semaphore（需要 Release），EOS 返回 nil（已等待完成，无需 Release）
+func (s *broadcastCounterAll) decreaseBroadcastCount(id uuid.UUID, seq uint64) (int32, *semaphore.Weighted) {
 	s.l.RLock()
 	group, ok := s.groups[id]
 	s.l.RUnlock()
 
 	if !ok {
-		return -1
+		return -1, nil
 	}
 
 	group.l.Lock()
@@ -123,22 +137,24 @@ func (s *broadcastCounterAll) decreaseBroadcastCount(id uuid.UUID, seq uint64) i
 
 	item, ok := group.items[seq]
 	if !ok {
-		return -1
+		return -1, nil
 	}
 
 	remain := item.count.Add(-1)
-	if remain <= 0 {
-		if remain == 0 {
-			if item.timer != nil {
-				item.timer.Stop()
-				item.timer = nil
-			}
-			delete(group.items, seq)
-			itemPool.Put(item) // 归还对象
-		}
-		return 0
+	if remain > 0 {
+		// 非 EOS handler: 获取 1 个槽位，后续需要 Release
+		item.sendSem.Acquire(context.Background(), 1)
+		return remain, item.sendSem
 	}
-	return remain
+	// remain == 0, EOS handler: 等待获取 totalCount 个槽位（即等待其他全部完成）
+	item.sendSem.Acquire(context.Background(), int64(item.totalCount))
+	if item.timer != nil {
+		item.timer.Stop()
+		item.timer = nil
+	}
+	delete(group.items, seq)
+	itemPool.Put(item) // 归还对象
+	return 0, nil      // EOS handler 已等待完成，无需 Release
 }
 
 // startCleanupLoop 后台清理空 Group 的逻辑

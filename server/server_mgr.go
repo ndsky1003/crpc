@@ -18,6 +18,7 @@ import (
 	"github.com/ndsky1003/net/v2/conn"
 	"github.com/ndsky1003/net/v2/server"
 	"github.com/panjf2000/ants/v2"
+	"golang.org/x/sync/semaphore"
 )
 
 type server_mgr struct {
@@ -268,8 +269,13 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byt
 					slog.Error("broad cast send", "err", err)
 					return
 				}
-				if remain := s.broadcastCounter.decreaseBroadcastCount(sid, seq); remain <= 0 {
+				remain, sem := s.broadcastCounter.decreaseBroadcastCount(sid, seq)
+				if remain <= 0 {
 					copy_h.Flags.With(headerflags.EOS)
+				}
+				// 非 EOS: 释放获取的槽位（因为失败不需要等待发送完成）
+				if sem != nil {
+					sem.Release(1)
 				}
 				if replyErr := s.replyError(sess, copy_h, err); replyErr != nil {
 					slog.Error("replyError", "err", replyErr)
@@ -325,8 +331,11 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, b
 	}
 	targetSess := target.(server.Session)
 	var need_pack bool
+	var sendSem *semaphore.Weighted
 	if h.Flags.IsBroadcast() {
-		if remain := s.broadcastCounter.decreaseBroadcastCount(tosid, h.Seq); remain <= 0 {
+		remain, sem := s.broadcastCounter.decreaseBroadcastCount(tosid, h.Seq)
+		sendSem = sem
+		if remain <= 0 {
 			h.Flags.Add(headerflags.EOS)
 			need_pack = true
 			if h.Flags.IsDebug() {
@@ -338,6 +347,7 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, b
 		// 可能会导致 EOS 丢失，Client 会依赖超时机制兜底。
 	}
 	if need_pack {
+		// EOS handler: 已经在 decreaseBroadcastCount 中等待完成，直接发送
 		if h.Flags.IsDebug() {
 			slog.Debug("handleRes", "header", h, "trace_id", h.TraceID)
 		}
@@ -351,7 +361,22 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, b
 	if h.Flags.IsDebug() {
 		slog.Debug("handleRes", "header", h, "trace_id", h.TraceID)
 	}
-	return s.forward(targetSess, data, timeout, wg)
+	// return s.forward(targetSess, data, timeout, wg)
+	f := func(o *conn.Option) {
+		o.SetWriteTimeout(timeout)
+	}
+	if wg != nil {
+		wg.Add(1)
+		f = func(o *conn.Option) {
+			o.SetWriteTimeout(timeout).SetSendDeferFn(func() {
+				wg.Done()
+				if sendSem != nil {
+					sendSem.Release(1)
+				}
+			})
+		}
+	}
+	return targetSess.Sends(context.Background(), [][]byte{data}, server.Options().WithConn(f))
 }
 
 func (s *server_mgr) forward(sess server.Session, data []byte, timeout time.Duration, wg *sync.WaitGroup) error {
