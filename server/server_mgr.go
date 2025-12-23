@@ -79,6 +79,9 @@ func (s *server_mgr) OnDisconnect(sess server.Session, err error) error {
 
 func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 	h, meta, body, err := protocol.Unpack(data)
+	if h.Flags.IsDebug() {
+		slog.Debug("OnMessage", "header", h, "trace_id", h.TraceID)
+	}
 	if err != nil {
 		return fmt.Errorf("unpack error: %v", err)
 	}
@@ -326,18 +329,27 @@ func (s *server_mgr) handleRes(_ server.Session, h *header.Header, data, meta, b
 		if remain := s.broadcastCounter.decreaseBroadcastCount(tosid, h.Seq); remain <= 0 {
 			h.Flags.Add(headerflags.EOS)
 			need_pack = true
+			if h.Flags.IsDebug() {
+				slog.Debug("handleRes", "header", h, "trace_id", h.TraceID)
+			}
 		}
 		//NOTE:
 		// 注意：如果重启了 Server 或者超时清理了 Map，
 		// 可能会导致 EOS 丢失，Client 会依赖超时机制兜底。
 	}
 	if need_pack {
+		if h.Flags.IsDebug() {
+			slog.Debug("handleRes", "header", h, "trace_id", h.TraceID)
+		}
 		packet, err := protocol.Pack(h, meta, body)
 		if err != nil {
 			return err
 		}
 		//不需要同步，因为是新打的packet,packet 底层还是body,所以要传递wg
 		return s.forwards(targetSess, packet, timeout, wg)
+	}
+	if h.Flags.IsDebug() {
+		slog.Debug("handleRes", "header", h, "trace_id", h.TraceID)
 	}
 	return s.forward(targetSess, data, timeout, wg)
 }

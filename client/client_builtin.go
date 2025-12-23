@@ -187,12 +187,18 @@ func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte, d
 		if h.Flags.IsEOS() { //server那边2个goroutine，一个超时，一个正常返回的goroutine
 			val, ok = c.pending.LoadAndDelete(seq)
 			if !ok {
+				if h.Flags.IsDebug() {
+					slog.DebugContext(ctx, "ddd")
+				}
 				netpool.Release(data)
 				return nil // 确实找不到了（可能已超时被清理）
 			}
 		} else {
 			val, ok = c.pending.Load(seq)
 			if !ok {
+				if h.Flags.IsDebug() {
+					slog.DebugContext(ctx, "ddd")
+				}
 				netpool.Release(data)
 				return nil // 确实找不到了（可能已超时被清理）
 			}
