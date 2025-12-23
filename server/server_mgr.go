@@ -281,15 +281,15 @@ func (s *server_mgr) handleReq(sess server.Session, h *header.Header, data []byt
 					handleFailure(err)
 				}
 			}
+			wg.Add(1) //必须先添加,后面添加有可能任务先执行
 			if err := s.workPool.Submit(task); err != nil {
+				wg.Done()
 				if err == ants.ErrPoolOverload {
 					err = errors.New(errors.ServerInternal, "server busy")
 				} else {
 					err = errors.New(errors.ServerInternal, err.Error())
 				}
 				handleFailure(err)
-			} else {
-				wg.Add(1)
 			}
 		}
 		return nil
