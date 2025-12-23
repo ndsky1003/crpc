@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ndsky1003/crpc/v3/buffer/netpool"
+	"github.com/ndsky1003/crpc/v3/client/broadcastresult"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/protocol"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
@@ -115,31 +116,31 @@ func (c *Client) HandleMsg(data []byte) error {
 	}
 	//返回的广播合并成单线程
 	if h.Type.IsRes() && h.Flags.IsBroadcast() {
-		defer netpool.Release(data)
 		defer h.Release()
-		if err := c.handleRes(ctx, h, body); err != nil {
+		if err := c.handleRes(ctx, h, body, data); err != nil {
 			slog.Error("handleRes", "err", err)
 		}
 		return nil
 	}
 
-	go func() {
-		defer netpool.Release(data)
-		defer h.Release()
-		switch {
-		case h.Type.IsReq():
+	switch {
+	case h.Type.IsReq():
+		go func() {
+			defer netpool.Release(data)
+			defer h.Release()
 			if err := c.handleReq(ctx, h, meta, body); err != nil {
 				slog.Error("handleReq", "err", err)
 			}
-		case h.Type.IsRes():
-			if err := c.handleRes(ctx, h, body); err != nil {
+		}()
+	case h.Type.IsRes():
+		go func() {
+			if err := c.handleRes(ctx, h, body, data); err != nil {
 				slog.Error("handleRes", "err", err)
 			}
-		default:
-			slog.Error("unknown header type", "type", h.Type)
-		}
-	}()
-
+		}()
+	default:
+		slog.Error("unknown header type", "type", h.Type)
+	}
 	return nil
 }
 
@@ -173,7 +174,7 @@ func (c *Client) invoke_local_func(ctx context.Context, mod, method string, meta
 	}
 }
 
-func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) error {
+func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte, data []byte) error {
 	seq := h.Seq
 	isBroadcast := h.Flags.IsBroadcast()
 	if h.Flags.IsDebug() {
@@ -186,23 +187,31 @@ func (c *Client) handleRes(ctx context.Context, h *header.Header, body []byte) e
 		if h.Flags.IsEOS() { //server那边2个goroutine，一个超时，一个正常返回的goroutine
 			val, ok = c.pending.LoadAndDelete(seq)
 			if !ok {
+				netpool.Release(data)
 				return nil // 确实找不到了（可能已超时被清理）
 			}
 		} else {
 			val, ok = c.pending.Load(seq)
 			if !ok {
+				netpool.Release(data)
 				return nil // 确实找不到了（可能已超时被清理）
 			}
 		}
 		call := val.(*Call)
-		c_body := make([]byte, len(body))
-		copy(c_body, body)
-		d := &broadcastResult{rawBody: c_body, resCoderT: h.ResCoderT, code: h.Code, IsEOS: h.Flags.IsEOS()}
+		d := broadcastresult.Get()
+		d.RawBody = body
+		d.ResCoderT = h.ResCoderT
+		d.Code = h.Code
+		d.IsEOS = h.Flags.IsEOS()
+		d.ReleaseCallback = func() {
+			netpool.Release(data)
+		}
 		if h.Flags.IsDebug() {
 			slog.DebugContext(ctx, "broadcast receive", "data", d)
 		}
 		call.trySendBroadcastResult(d)
 	} else {
+		defer netpool.Release(data)
 		val, ok := c.pending.LoadAndDelete(seq)
 		if !ok {
 			return nil // 确实找不到了（可能已超时被清理）

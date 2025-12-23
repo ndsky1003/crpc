@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ndsky1003/crpc/v3/buffer/netpool"
+	"github.com/ndsky1003/crpc/v3/client/broadcastresult"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/comm/ut"
 	"github.com/ndsky1003/crpc/v3/compressor"
@@ -136,18 +137,19 @@ func (c *Client) executeChain(ctx context.Context, callType headertype.T, servic
 	return mCtx.Call
 }
 
-func (c *Client) dispatchBroadcast(call *Call, res *broadcastResult, isEOS bool) bool {
+func (c *Client) dispatchBroadcast(call *Call, res *broadcastresult.Result, isEOS bool) bool {
+	defer broadcastresult.Put(res)
 	if call.BroadcastResNewFunc == nil || call.BroadcastResCallBack == nil {
 		return false
 	}
 	var reply any
 	var resErr error
-	if res.fromLocal { // 本地调用优化，直接有对象
-		if res.code.IsOK() {
-			reply = res.res
+	if res.FromLocal { // 本地调用优化，直接有对象
+		if res.Code.IsOK() {
+			reply = res.Res
 		} else {
-			if res.res != nil { //空返回,这里就是nil
-				if err, ok := res.res.(error); ok {
+			if res.Res != nil { //空返回,这里就是nil
+				if err, ok := res.Res.(error); ok {
 					if er, ok1 := err.(*errors.Error); ok1 {
 						resErr = er
 					} else {
@@ -159,14 +161,14 @@ func (c *Client) dispatchBroadcast(call *Call, res *broadcastResult, isEOS bool)
 			}
 		}
 	} else { //remote
-		if res.code.IsOK() {
+		if res.Code.IsOK() {
 			reply = call.BroadcastResNewFunc()
-			if err := coder.Unmarshal(res.resCoderT, res.rawBody, reply); err != nil {
+			if err := coder.Unmarshal(res.ResCoderT, res.RawBody, reply); err != nil {
 				resErr = errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
 			}
 		} else {
 			tmpErr := &errors.Error{}
-			if err := coder.Unmarshal(res.resCoderT, res.rawBody, tmpErr); err != nil {
+			if err := coder.Unmarshal(res.ResCoderT, res.RawBody, tmpErr); err != nil {
 				resErr = errors.New(errors.ClientInternal, "unmarshal error: "+err.Error())
 			}
 			if tmpErr.Code != errors.None {

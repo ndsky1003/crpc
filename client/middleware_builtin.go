@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ndsky1003/crpc/v3/client/broadcastresult"
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/comm/ut"
 	"github.com/ndsky1003/crpc/v3/protocol"
@@ -129,7 +130,7 @@ func MwBroadcast(c *Client) HandlerFunc {
 			}
 			call.BroadcastResNewFunc = opt.BroadcastResNewFunc
 			call.BroadcastResCallBack = opt.BroadcastResCallBack
-			call.broadcastCh = make(chan *broadcastResult, *opt.BroadcastChanCap)
+			call.broadcastCh = make(chan *broadcastresult.Result, *opt.BroadcastChanCap)
 			call.subCtx, call.subCancel = context.WithCancel(context.Background())
 			if ctx.Header.Flags.IsDebug() {
 				slog.DebugContext(ctx.Ctx, "MwBroadcast", "header", ctx.Header)
@@ -159,11 +160,10 @@ func MwLocal(c *Client) HandlerFunc {
 				if r := recover(); r != nil {
 					panicErr := fmt.Errorf("local call panic: %v", r)
 					if isBroadcast {
-						resObj := &broadcastResult{
-							code:      headercode.Failed,
-							fromLocal: true,
-							res:       panicErr,
-						}
+						resObj := broadcastresult.Get()
+						resObj.Code = headercode.Failed
+						resObj.FromLocal = true
+						resObj.Res = panicErr
 						ctx.Call.trySendBroadcastResult(resObj)
 					} else {
 						ctx.Call.Error = panicErr
@@ -182,14 +182,13 @@ func MwLocal(c *Client) HandlerFunc {
 			}
 			call := ctx.Call
 			if isBroadcast {
-				resObj := &broadcastResult{
-					res:       res, //这里可能是res，也可能是err，通过code来判断
-					code:      headercode.OK,
-					fromLocal: true,
-				}
+				resObj := broadcastresult.Get()
+				resObj.Res = res //这里可能是res，也可能是err，通过code来判断
+				resObj.Code = headercode.OK
+				resObj.FromLocal = true
 				if err != nil {
-					resObj.code = headercode.Failed
-					resObj.res = err
+					resObj.Code = headercode.Failed
+					resObj.Res = err
 				}
 				call.trySendBroadcastResult(resObj)
 			} else {

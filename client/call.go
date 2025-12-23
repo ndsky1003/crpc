@@ -5,19 +5,18 @@ import (
 	"log/slog"
 	"sync/atomic"
 
-	"github.com/ndsky1003/crpc/v3/coder"
+	"github.com/ndsky1003/crpc/v3/client/broadcastresult"
 	"github.com/ndsky1003/crpc/v3/protocol/errors"
-	"github.com/ndsky1003/crpc/v3/protocol/header/headercode"
 )
 
-type broadcastResult struct {
-	rawBody   []byte       // 原始数据
-	res       any          // 已经解码的对象（来自本地优化）,可以是返回值，也可以是错误，通过code判断
-	resCoderT coder.T      // 编码类型
-	code      headercode.T // 是否成功
-	IsEOS     bool         // 是否是结束标志
-	fromLocal bool         // 标记是否来自本地调用 ,支持空返回值，所以必须用一个独立的字段来判断
-}
+// type broadcastResult struct {
+// 	rawBody   []byte       // 原始数据
+// 	res       any          // 已经解码的对象（来自本地优化）,可以是返回值，也可以是错误，通过code判断
+// 	resCoderT coder.T      // 编码类型
+// 	code      headercode.T // 是否成功
+// 	IsEOS     bool         // 是否是结束标志
+// 	fromLocal bool         // 标记是否来自本地调用 ,支持空返回值，所以必须用一个独立的字段来判断
+// }
 
 type Call struct {
 	seq   uint64
@@ -35,7 +34,7 @@ type Call struct {
 	// 2.正常探测到最后一个返回值 ,这2个不在一个goroutine
 	//但是client本地会过滤掉后达到的那条。最终结果有可能远端执行了所有，但是收到超时的EOS
 	BroadcastResCallBack func(ret any, err error, eos bool) bool
-	broadcastCh          chan *broadcastResult
+	broadcastCh          chan *broadcastresult.Result
 	subCtx               context.Context
 	subCancel            context.CancelFunc
 	normalStop           atomic.Bool //表示是否收到过EOS
@@ -81,8 +80,8 @@ func (this *Call) done() {
 
 // 不是一定是单线程执行，理论上有2个，一个是消费线程，一个是send满的那个goroutine
 // NOTE: 概率小的可怜
-func (c *Call) fixStop(res *broadcastResult) (isEOS bool) {
-	if res.fromLocal {
+func (c *Call) fixStop(res *broadcastresult.Result) (isEOS bool) {
+	if res.FromLocal {
 		c.localStop.Store(true)
 	}
 	if res.IsEOS {
@@ -93,15 +92,17 @@ func (c *Call) fixStop(res *broadcastResult) (isEOS bool) {
 }
 
 // trySendBroadcastResult 尝试发送广播结果，如果通道满则丢弃，防止阻塞
-func (c *Call) trySendBroadcastResult(res *broadcastResult) {
+func (c *Call) trySendBroadcastResult(res *broadcastresult.Result) {
 	select {
 	case c.broadcastCh <- res:
 	case <-c.subCtx.Done():
 		err := c.subCtx.Err()
 		slog.Error("subCtx Cancel", "err", err, "res", res)
+		broadcastresult.Put(res)
 	default:
 		c.fixStop(res)
 		err := errors.New(errors.ClientInternal, "广播通道满，丢弃消息")
 		slog.Error("broadcastCh exhaust", "err", err, "res", res)
+		broadcastresult.Put(res)
 	}
 }
