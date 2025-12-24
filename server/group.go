@@ -2,7 +2,6 @@ package server
 
 import (
 	crand "crypto/rand"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"log/slog"
@@ -15,16 +14,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ndsky1003/crpc/v3/protocol/errors"
 	"github.com/ndsky1003/net/v2/server"
 )
 
 var (
 	// ErrEmptySessionID Session ID 为空错误
-	ErrEmptySessionID = errors.New("session ID is empty")
+	ErrEmptySessionID = errors.New(errors.ServerInternal, "session ID is empty")
 	// ErrNoAvailableSession 没有可用的 Session
-	ErrNoAvailableSession = errors.New("no available session")
+	ErrNoAvailableSession = errors.New(errors.ServerServiceUnavailable, "no available session")
 	// ErrInconsistentState 状态不一致错误
-	ErrInconsistentState = errors.New("inconsistent state detected")
+	ErrInconsistentState = errors.New(errors.ServerInternal, "inconsistent state detected")
 )
 
 // Session 包装底层 server.Session，添加服务发现所需的元数据
@@ -81,7 +81,7 @@ type ServiceGroup struct {
 // NewServiceGroup 创建服务组
 func NewServiceGroup(name string, replicas int) (*ServiceGroup, error) {
 	if name == "" {
-		return nil, errors.New("service group name cannot be empty")
+		return nil, errors.New(errors.ServerInternal, "service group name cannot be empty")
 	}
 
 	if replicas <= 0 {
@@ -133,7 +133,7 @@ func (sg *ServiceGroup) hashFunc(key string) uint32 {
 // Add 添加或更新 Session（线程安全）
 func (sg *ServiceGroup) Add(s *Session) error {
 	if s == nil {
-		return errors.New("session cannot be nil")
+		return errors.New(errors.ServerInternal, "session cannot be nil")
 	}
 
 	// 权重 ≤ 0 视为删除操作
@@ -330,7 +330,7 @@ func (sg *ServiceGroup) buildHashRing(sessions []*Session, replicas int) *consis
 // SelectByKey 根据 key 使用一致性哈希选择节点（完全无锁）
 func (sg *ServiceGroup) SelectByKey(key string) (*Session, error) {
 	if key == "" {
-		return nil, errors.New("key cannot be empty")
+		return nil, errors.New(errors.ServerInternal, "key cannot be empty")
 	}
 
 	// 1. 原子加载哈希环
