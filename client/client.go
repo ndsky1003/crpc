@@ -153,7 +153,7 @@ func (c *Client) dispatchBroadcast(call *Call, res *broadcastresult.Result, isEO
 					if er, ok1 := err.(*errors.Error); ok1 {
 						resErr = er
 					} else {
-						resErr = errors.Newf(errors.ClientCallError, "err:%+v", er)
+						resErr = errors.Newf(errors.ClientCallError, "err:%+v", err)
 					}
 				} else {
 					resErr = errors.Newf(errors.ClientReturnInvalid, "invalid return ,ret:%+v is not error", res)

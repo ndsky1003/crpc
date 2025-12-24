@@ -9,8 +9,8 @@ import (
 	"github.com/tinylib/msgp/msgp"
 )
 
-func TestMarshalUnmarshalBroadcastReq(t *testing.T) {
-	v := BroadcastReq{}
+func TestMarshalUnmarshalOrderReq(t *testing.T) {
+	v := OrderReq{}
 	bts, err := v.MarshalMsg(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -32,8 +32,8 @@ func TestMarshalUnmarshalBroadcastReq(t *testing.T) {
 	}
 }
 
-func BenchmarkMarshalMsgBroadcastReq(b *testing.B) {
-	v := BroadcastReq{}
+func BenchmarkMarshalMsgOrderReq(b *testing.B) {
+	v := OrderReq{}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -41,8 +41,8 @@ func BenchmarkMarshalMsgBroadcastReq(b *testing.B) {
 	}
 }
 
-func BenchmarkAppendMsgBroadcastReq(b *testing.B) {
-	v := BroadcastReq{}
+func BenchmarkAppendMsgOrderReq(b *testing.B) {
+	v := OrderReq{}
 	bts := make([]byte, 0, v.Msgsize())
 	bts, _ = v.MarshalMsg(bts[0:0])
 	b.SetBytes(int64(len(bts)))
@@ -53,8 +53,8 @@ func BenchmarkAppendMsgBroadcastReq(b *testing.B) {
 	}
 }
 
-func BenchmarkUnmarshalBroadcastReq(b *testing.B) {
-	v := BroadcastReq{}
+func BenchmarkUnmarshalOrderReq(b *testing.B) {
+	v := OrderReq{}
 	bts, _ := v.MarshalMsg(nil)
 	b.ReportAllocs()
 	b.SetBytes(int64(len(bts)))
@@ -67,17 +67,17 @@ func BenchmarkUnmarshalBroadcastReq(b *testing.B) {
 	}
 }
 
-func TestEncodeDecodeBroadcastReq(t *testing.T) {
-	v := BroadcastReq{}
+func TestEncodeDecodeOrderReq(t *testing.T) {
+	v := OrderReq{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 
 	m := v.Msgsize()
 	if buf.Len() > m {
-		t.Log("WARNING: TestEncodeDecodeBroadcastReq Msgsize() is inaccurate")
+		t.Log("WARNING: TestEncodeDecodeOrderReq Msgsize() is inaccurate")
 	}
 
-	vn := BroadcastReq{}
+	vn := OrderReq{}
 	err := msgp.Decode(&buf, &vn)
 	if err != nil {
 		t.Error(err)
@@ -91,8 +91,8 @@ func TestEncodeDecodeBroadcastReq(t *testing.T) {
 	}
 }
 
-func BenchmarkEncodeBroadcastReq(b *testing.B) {
-	v := BroadcastReq{}
+func BenchmarkEncodeOrderReq(b *testing.B) {
+	v := OrderReq{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 	b.SetBytes(int64(buf.Len()))
@@ -105,8 +105,8 @@ func BenchmarkEncodeBroadcastReq(b *testing.B) {
 	en.Flush()
 }
 
-func BenchmarkDecodeBroadcastReq(b *testing.B) {
-	v := BroadcastReq{}
+func BenchmarkDecodeOrderReq(b *testing.B) {
+	v := OrderReq{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 	b.SetBytes(int64(buf.Len()))
@@ -122,8 +122,8 @@ func BenchmarkDecodeBroadcastReq(b *testing.B) {
 	}
 }
 
-func TestMarshalUnmarshalBroadcastRes(t *testing.T) {
-	v := BroadcastRes{}
+func TestMarshalUnmarshalOrderRes(t *testing.T) {
+	v := OrderRes{}
 	bts, err := v.MarshalMsg(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -145,8 +145,8 @@ func TestMarshalUnmarshalBroadcastRes(t *testing.T) {
 	}
 }
 
-func BenchmarkMarshalMsgBroadcastRes(b *testing.B) {
-	v := BroadcastRes{}
+func BenchmarkMarshalMsgOrderRes(b *testing.B) {
+	v := OrderRes{}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -154,8 +154,8 @@ func BenchmarkMarshalMsgBroadcastRes(b *testing.B) {
 	}
 }
 
-func BenchmarkAppendMsgBroadcastRes(b *testing.B) {
-	v := BroadcastRes{}
+func BenchmarkAppendMsgOrderRes(b *testing.B) {
+	v := OrderRes{}
 	bts := make([]byte, 0, v.Msgsize())
 	bts, _ = v.MarshalMsg(bts[0:0])
 	b.SetBytes(int64(len(bts)))
@@ -166,8 +166,8 @@ func BenchmarkAppendMsgBroadcastRes(b *testing.B) {
 	}
 }
 
-func BenchmarkUnmarshalBroadcastRes(b *testing.B) {
-	v := BroadcastRes{}
+func BenchmarkUnmarshalOrderRes(b *testing.B) {
+	v := OrderRes{}
 	bts, _ := v.MarshalMsg(nil)
 	b.ReportAllocs()
 	b.SetBytes(int64(len(bts)))
@@ -180,17 +180,17 @@ func BenchmarkUnmarshalBroadcastRes(b *testing.B) {
 	}
 }
 
-func TestEncodeDecodeBroadcastRes(t *testing.T) {
-	v := BroadcastRes{}
+func TestEncodeDecodeOrderRes(t *testing.T) {
+	v := OrderRes{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 
 	m := v.Msgsize()
 	if buf.Len() > m {
-		t.Log("WARNING: TestEncodeDecodeBroadcastRes Msgsize() is inaccurate")
+		t.Log("WARNING: TestEncodeDecodeOrderRes Msgsize() is inaccurate")
 	}
 
-	vn := BroadcastRes{}
+	vn := OrderRes{}
 	err := msgp.Decode(&buf, &vn)
 	if err != nil {
 		t.Error(err)
@@ -204,8 +204,8 @@ func TestEncodeDecodeBroadcastRes(t *testing.T) {
 	}
 }
 
-func BenchmarkEncodeBroadcastRes(b *testing.B) {
-	v := BroadcastRes{}
+func BenchmarkEncodeOrderRes(b *testing.B) {
+	v := OrderRes{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 	b.SetBytes(int64(buf.Len()))
@@ -218,8 +218,8 @@ func BenchmarkEncodeBroadcastRes(b *testing.B) {
 	en.Flush()
 }
 
-func BenchmarkDecodeBroadcastRes(b *testing.B) {
-	v := BroadcastRes{}
+func BenchmarkDecodeOrderRes(b *testing.B) {
+	v := OrderRes{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 	b.SetBytes(int64(buf.Len()))
@@ -235,8 +235,8 @@ func BenchmarkDecodeBroadcastRes(b *testing.B) {
 	}
 }
 
-func TestMarshalUnmarshalBroadcastService(t *testing.T) {
-	v := BroadcastService{}
+func TestMarshalUnmarshalOrderService(t *testing.T) {
+	v := OrderService{}
 	bts, err := v.MarshalMsg(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -258,8 +258,8 @@ func TestMarshalUnmarshalBroadcastService(t *testing.T) {
 	}
 }
 
-func BenchmarkMarshalMsgBroadcastService(b *testing.B) {
-	v := BroadcastService{}
+func BenchmarkMarshalMsgOrderService(b *testing.B) {
+	v := OrderService{}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -267,8 +267,8 @@ func BenchmarkMarshalMsgBroadcastService(b *testing.B) {
 	}
 }
 
-func BenchmarkAppendMsgBroadcastService(b *testing.B) {
-	v := BroadcastService{}
+func BenchmarkAppendMsgOrderService(b *testing.B) {
+	v := OrderService{}
 	bts := make([]byte, 0, v.Msgsize())
 	bts, _ = v.MarshalMsg(bts[0:0])
 	b.SetBytes(int64(len(bts)))
@@ -279,8 +279,8 @@ func BenchmarkAppendMsgBroadcastService(b *testing.B) {
 	}
 }
 
-func BenchmarkUnmarshalBroadcastService(b *testing.B) {
-	v := BroadcastService{}
+func BenchmarkUnmarshalOrderService(b *testing.B) {
+	v := OrderService{}
 	bts, _ := v.MarshalMsg(nil)
 	b.ReportAllocs()
 	b.SetBytes(int64(len(bts)))
@@ -293,17 +293,17 @@ func BenchmarkUnmarshalBroadcastService(b *testing.B) {
 	}
 }
 
-func TestEncodeDecodeBroadcastService(t *testing.T) {
-	v := BroadcastService{}
+func TestEncodeDecodeOrderService(t *testing.T) {
+	v := OrderService{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 
 	m := v.Msgsize()
 	if buf.Len() > m {
-		t.Log("WARNING: TestEncodeDecodeBroadcastService Msgsize() is inaccurate")
+		t.Log("WARNING: TestEncodeDecodeOrderService Msgsize() is inaccurate")
 	}
 
-	vn := BroadcastService{}
+	vn := OrderService{}
 	err := msgp.Decode(&buf, &vn)
 	if err != nil {
 		t.Error(err)
@@ -317,8 +317,8 @@ func TestEncodeDecodeBroadcastService(t *testing.T) {
 	}
 }
 
-func BenchmarkEncodeBroadcastService(b *testing.B) {
-	v := BroadcastService{}
+func BenchmarkEncodeOrderService(b *testing.B) {
+	v := OrderService{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 	b.SetBytes(int64(buf.Len()))
@@ -331,8 +331,8 @@ func BenchmarkEncodeBroadcastService(b *testing.B) {
 	en.Flush()
 }
 
-func BenchmarkDecodeBroadcastService(b *testing.B) {
-	v := BroadcastService{}
+func BenchmarkDecodeOrderService(b *testing.B) {
+	v := OrderService{}
 	var buf bytes.Buffer
 	msgp.Encode(&buf, &v)
 	b.SetBytes(int64(buf.Len()))
