@@ -83,9 +83,12 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 	if h.Flags.IsDebug() {
 		slog.Debug("OnMessage", "header", h, "trace_id", h.TraceID)
 	}
-	if err != nil {
-		return fmt.Errorf("unpack error: %v", err)
+	if err != nil { //
+		defer netpool.Release(data)
+		slog.Error("OnMessage Unpack header", "err", errors.Newf(errors.ServerInternal, "unpack error: %v", err), "trace_id", h.TraceID)
+		return nil
 	}
+
 	if h.Flags.IsHandshake() {
 		defer netpool.Release(data)
 		defer h.Release()
@@ -155,11 +158,16 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 				// 优先返回具体的错误信息 (token invalid, rate limit 等)
 				// 不管是否 Abort，只要有 Err，就以 Err 为主
 				slog.Warn("request process", "err", err)
-				s.replyError(sess, h, err)
+				if e := s.replyError(sess, h, err); e != nil {
+					slog.Error("replyError", "err", e, "origin_err", err)
+				}
 			} else if ctx.IsAborted() {
 				// 处理 "Abort 但无 Err" 的死角
 				// 必须回包，防止客户端超时
-				s.replyError(sess, h, errors.New(errors.ServerStandardError, "request aborted by middleware"))
+				err := errors.New(errors.ServerStandardError, "request aborted by middleware")
+				if e := s.replyError(sess, h, err); e != nil {
+					slog.Error("replyError", "err", e, "origin_err", err)
+				}
 			}
 		case headertype.Send:
 			if err := ctx.Err(); err != nil {
@@ -175,12 +183,16 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		}
 	}
 	if err = s.workPool.Submit(task); err != nil {
+		if err == ants.ErrPoolOverload {
+			err = errors.New(errors.ServerInternal, "server busy")
+		} else {
+			err = errors.New(errors.ServerInternal, err.Error())
+		}
+		if e := s.replyError(sess, h, err); e != nil {
+			slog.Error("replyError", "err", e, "origin_err", err)
+		}
 		h.Release()
 		netpool.Release(data)
-		if err == ants.ErrPoolOverload {
-			return errors.New(errors.ServerInternal, "server busy")
-		}
-		return errors.New(errors.ServerInternal, err.Error())
 	}
 	return nil
 }
