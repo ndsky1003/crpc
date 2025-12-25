@@ -1,3 +1,6 @@
+//go:build !business && !small
+// +build !business,!small
+
 package main
 
 import (
@@ -348,7 +351,6 @@ func printFinalStats(stats *PerformanceStats) {
 	totalReq := atomic.LoadInt64(&stats.TotalRequests)
 	successReq := atomic.LoadInt64(&stats.SuccessRequests)
 	failedReq := atomic.LoadInt64(&stats.FailedRequests)
-	totalLatency := atomic.LoadInt64(&stats.TotalLatency)
 
 	elapsed := time.Since(stats.StartTime)
 	qps := float64(totalReq) / elapsed.Seconds()

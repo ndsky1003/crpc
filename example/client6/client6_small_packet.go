@@ -1,5 +1,5 @@
-//go:build business
-// +build business
+//go:build small
+// +build small
 
 package main
 
@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,31 +20,27 @@ import (
 
 // 性能统计
 type PerformanceStats struct {
-	TotalRequests    int64     `json:"total_requests"`
-	SuccessRequests  int64     `json:"success_requests"`
-	FailedRequests   int64     `json:"failed_requests"`
-	TotalLatency     int64     `json:"total_latency_ns"`
-	MinLatency       int64     `json:"min_latency_ns"`
-	MaxLatency       int64     `json:"max_latency_ns"`
-	StartTime        time.Time `json:"start_time"`
-	LastUpdateTime   time.Time `json:"last_update_time"`
-	BytesSent        int64     `json:"bytes_sent"`
-	BytesReceived    int64     `json:"bytes_received"`
-	TotalReqBytes    int64     `json:"total_req_bytes"`
-	TotalResBytes    int64     `json:"total_res_bytes"`
+	TotalRequests int64     `json:"total_requests"`
+	SuccessRequests int64    `json:"success_requests"`
+	FailedRequests  int64    `json:"failed_requests"`
+	TotalLatency    int64    `json:"total_latency_ns"`
+	MinLatency      int64    `json:"min_latency_ns"`
+	MaxLatency      int64    `json:"max_latency_ns"`
+	StartTime       time.Time `json:"start_time"`
+	TotalReqBytes   int64     `json:"total_req_bytes"`
+	TotalResBytes   int64     `json:"total_res_bytes"`
 }
 
 // 测试场景
 type TestScenario struct {
-	Name        string
-	Description string
-	Requests    []*dto.BusinessReq // 预生成的请求列表
-	Execute     func(context.Context, *dto.BusinessReq, ...*client.Option) (*dto.BusinessRes, error)
+	Name     string
+	Requests []*dto.BusinessReq
+	Execute  func(context.Context, *dto.BusinessReq, ...*client.Option) (*dto.BusinessRes, error)
 }
 
 func main() {
 	// 显示系统信息
-	fmt.Println("========== 长期压力测试 Client6 (Business Data) ==========")
+	fmt.Println("========== 小包压力测试 Client6 (目标 ~1KB 包) ==========")
 	fmt.Printf("CPU核心数: %d\n", runtime.NumCPU())
 	fmt.Printf("GOOS: %s\n", runtime.GOOS)
 	fmt.Printf("GOARCH: %s\n", runtime.GOARCH)
@@ -55,7 +50,7 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	// 初始化客户端
-	c, err := client.Dial(context.Background(), "client6_business", ":8080",
+	c, err := client.Dial(context.Background(), "client6_small", ":8080",
 		client.Options().SetSecret("ddddd").
 			SetWithTraceID(func(ctx context.Context, tid string) context.Context {
 				return trace.WithTraceID(ctx, tid)
@@ -80,7 +75,7 @@ func main() {
 func runOneHourTest() {
 	fmt.Println("\n========== 开始1小时长期压力测试 ==========")
 
-	// 预生成静态测试数据（避免动态生成影响性能测试）
+	// 预生成静态测试数据（使用小包 ~1KB）
 	fmt.Println("\n预生成测试数据中...")
 	scenarios := initTestScenarios()
 	fmt.Println("测试数据生成完成")
@@ -91,8 +86,8 @@ func runOneHourTest() {
 
 	// 创建性能统计
 	stats := &PerformanceStats{
-		StartTime:      time.Now(),
-		MinLatency:     int64(^uint64(0) >> 1), // 最大值
+		StartTime:  time.Now(),
+		MinLatency: int64(^uint64(0) >> 1), // 最大值
 	}
 
 	// 启动性能监控协程
@@ -162,241 +157,177 @@ func runOneHourTest() {
 	printFinalStats(stats)
 }
 
-// 初始化测试场景并预生成请求数据（使用大数据包）
+// 初始化测试场景并预生成请求数据（使用小包 ~1KB）
 func initTestScenarios() []TestScenario {
 	baseTime := time.Now()
 	fixedTimestamp := baseTime.Unix()
 
-	// 生成大文本数据（约 1KB）
-	longText := strings.Repeat("这是一个很长的文本内容，用于测试大数据包传输性能。包含中文字符和数字1234567890。", 30)
-
-	// 生成大量商品（50个商品，约 50KB）
-	products := make([]*dto.ProductInfo, 50)
-	for i := 0; i < 50; i++ {
-		products[i] = &dto.ProductInfo{
-			ProductID:   fmt.Sprintf("product_%010d", i),
-			CategoryID:  fmt.Sprintf("cat_%05d", i%100),
-			Name:        fmt.Sprintf("Premium Product Name %d - High Quality Item with Long Description", i),
-			Description: longText,
-			Price:       float64((i*17)%10000) + 99.99,
-			Stock:       int32((i * 13) % 10000),
-			Sales:       int32((i * 7) % 50000),
-			Images:      []string{fmt.Sprintf("https://img.example.com/product_%d_1.jpg", i), fmt.Sprintf("https://img.example.com/product_%d_2.jpg", i), fmt.Sprintf("https://img.example.com/product_%d_3.jpg", i)},
-			Tags:        []string{"hot", "new", "sale", "popular", "recommend", "premium", "bestseller", "featured"},
-			CreateTime:  baseTime.Add(-time.Hour * 24 * time.Duration(i%365)),
-			UpdateTime:  baseTime,
-			IsActive:    i%10 != 0,
-		}
-	}
-
-	// 生成大量订单（20个订单，约 20KB）
-	orders := make([]*dto.OrderInfo, 20)
-	for i := 0; i < 20; i++ {
-		orders[i] = &dto.OrderInfo{
-			OrderID:        fmt.Sprintf("order_%010d", i),
-			UserID:         fmt.Sprintf("user_%08d", i%10000),
-			OrderNo:        fmt.Sprintf("ORD%010d", i*12345),
-			TotalAmount:    float64((i*97)%100000) + 999.99,
-			PayAmount:      float64((i*89)%90000) + 899.99,
-			DiscountAmount: 100.00,
-			Status:         int32(i % 5),
-			PayMethod:      []string{"alipay", "wechat", "card", "paypal", "bank_transfer"}[i%5],
-			PayTime:        baseTime.Add(-time.Hour * time.Duration(i%720)),
-			DeliveryAddr:   fmt.Sprintf("Room %d, Building %d, Street %d, District %d, City %d, Province %d, Country China, Postal Code %d", i%500, i%200, i%100, i%50, i%30, i%20, i%10*10000),
-			Remark:         longText[:min(len(longText), 200)],
-			CreateTime:     baseTime.Add(-time.Hour * 24 * time.Duration(i%30)),
-			UpdateTime:     baseTime,
-		}
-	}
-
-	// 生成大量购物车商品（30个商品）
-	cartItems := make([]dto.CartItemInfo, 30)
-	for i := 0; i < 30; i++ {
-		cartItems[i] = dto.CartItemInfo{
-			ProductID: fmt.Sprintf("product_%010d", i),
-			Name:      fmt.Sprintf("Shopping Cart Product %d - Premium Quality with Best Price", i),
-			Price:     float64((i*23)%5000) + 49.99,
-			Quantity:  int32((i + 1) % 10),
-		}
-	}
-
-	// 用户查询请求 - 中等数据包
+	// 用户查询请求 - 小包
 	userQueryReq := &dto.BusinessReq{
 		UserInfo: &dto.UserInfo{
-			UserID:     "user_12345",
-			Username:   "john_doe_smith_watson_junior",
-			Email:      "john.doe.watson.junior.long.email@example.com",
-			Phone:      "138001380001234567890",
-			Avatar:     "https://avatar.example.com/very/long/path/to/avatar/image/user_12345_hd.jpg",
-			CreateTime: baseTime.Add(-time.Hour * 24 * 365),
-			UpdateTime: baseTime,
-			Status:     1,
-			IsVIP:      true,
+			UserID:    "user_12345",
+			Username:  "john_doe",
+			Email:     "john@example.com",
+			Phone:     "13800138000",
+			IsVIP:     true,
+			Status:    1,
 		},
 		QueryParam: &dto.QueryParam{
 			PageNum:   1,
-			PageSize:  100,
+			PageSize:  10,
 			SortBy:    "create_time",
 			SortOrder: "desc",
 		},
-		RequestID:  "req_user_query_001_with_longer_id_for_testing",
-		ClientType: "mobile_app_version_3.0.0",
+		RequestID:  "req_user_query_001",
+		ClientType: "mobile",
 		Version:    "1.0.0",
 		Timestamp:  fixedTimestamp,
 	}
 
-	// 订单查询请求 - 返回大量订单数据
+	// 订单查询请求 - 小包
 	orderQueryReq := &dto.BusinessReq{
 		QueryParam: &dto.QueryParam{
 			PageNum:   1,
-			PageSize:  100,
+			PageSize:  10,
 			SortBy:    "create_time",
 			SortOrder: "desc",
 			Filters: map[string]string{
-				"user_id":          "user_12345",
-				"status":           "1",
-				"pay_time_start":   "2024-01-01",
-				"pay_time_end":     "2024-12-31",
-				"order_type":       "normal",
-				"payment_channel":  "alipay,wechat,card",
-				"amount_min":       "100.00",
-				"amount_max":       "10000.00",
-				"delivery_method":  "express,pickup",
+				"user_id": "user_12345",
+				"status":  "1",
 			},
 		},
-		RequestID:  "req_order_query_001_with_comprehensive_filters",
-		ClientType: "web_portal_version_2.5.1",
+		RequestID:  "req_order_query_001",
+		ClientType: "web",
 		Version:    "1.0.0",
 		Timestamp:  fixedTimestamp,
 	}
 
-	// 商品搜索请求 - 搜索大量商品
+	// 商品搜索请求 - 小包
 	productSearchReq := &dto.BusinessReq{
 		QueryParam: &dto.QueryParam{
-			PageNum:     1,
-			PageSize:    100,
-			SortBy:      "sales",
-			SortOrder:   "desc",
-			Keywords:    "laptop computer electronics premium high-performance gaming professional workstation",
-			CategoryID:  "cat_electronics_computers_laptops_gaming",
-			PriceMin:    1000.0,
-			PriceMax:    50000.0,
+			PageNum:    1,
+			PageSize:   10,
+			SortBy:     "sales",
+			SortOrder:  "desc",
+			Keywords:   "laptop",
+			CategoryID: "cat_001",
+			PriceMin:   100.0,
+			PriceMax:   5000.0,
 		},
-		RequestID:  "req_product_search_001_with_detailed_keywords",
-		ClientType: "mobile_app_version_3.0.0",
+		RequestID:  "req_product_search_001",
+		ClientType: "mobile",
 		Version:    "1.0.0",
 		Timestamp:  fixedTimestamp,
 	}
 
-	// 创建订单请求 - 包含大量商品
-	createOrderReq := &dto.BusinessReq{
-		OrderInfo: &dto.OrderInfo{
-			OrderID:        "order_67890_with_extra_details",
-			UserID:         "user_12345_premium_member",
-			OrderNo:        "ORD000000067890123456",
-			TotalAmount:    15999.99,
-			PayAmount:      14999.99,
-			DiscountAmount: 1000.00,
-			Status:         1,
-			PayMethod:      "alipay_premium",
-			PayTime:        baseTime.Add(-time.Hour * 2),
-			DeliveryAddr:   "Room 101, Building A, Street 1, District 2, City 3, Province 4, Country China, Postal Code 100000",
-			Remark:         longText[:min(len(longText), 500)],
-			CreateTime:     baseTime,
-			UpdateTime:     baseTime,
-		},
-		Products:  products[:10], // 10个商品
-		RequestID: "req_create_order_001_with_multiple_products",
-		TraceID:   "trace_12345_with_longer_trace_id_for_debugging",
-		ClientType: "app_premium_version",
-		Version:   "2.1.0",
-		Timestamp: fixedTimestamp,
+	// 创建订单请求 - 小包（含少量商品）
+	order := &dto.OrderInfo{
+		OrderID:        "order_67890",
+		UserID:         "user_12345",
+		OrderNo:        "ORD0000006789",
+		TotalAmount:    599.99,
+		PayAmount:      579.99,
+		DiscountAmount: 20.00,
+		Status:         1,
+		PayMethod:      "alipay",
+		PayTime:        baseTime.Add(-time.Hour * 2),
+		DeliveryAddr:   "Beijing China",
+		Remark:         "Fast delivery",
+		CreateTime:     baseTime,
+		UpdateTime:     baseTime,
 	}
 
-	// 购物车请求 - 包含大量商品
+	products := []*dto.ProductInfo{
+		dto.CreateTestProduct(1),
+		dto.CreateTestProduct(2),
+	}
+
+	createOrderReq := &dto.BusinessReq{
+		OrderInfo:  order,
+		Products:   products,
+		RequestID:  "req_create_order_001",
+		TraceID:    "trace_12345",
+		ClientType: "app",
+		Version:    "2.1.0",
+		Timestamp:  fixedTimestamp,
+	}
+
+	// 购物车请求 - 小包（少量商品）
+	items := []dto.CartItemInfo{
+		{ProductID: "prod_001", Name: "Mouse", Price: 49.99, Quantity: 1},
+		{ProductID: "prod_002", Name: "Keyboard", Price: 199.99, Quantity: 1},
+	}
+
+	cartInfo := &dto.CartInfo{
+		CartID:      "cart_98765",
+		UserID:      "user_12345",
+		Items:       items,
+		TotalAmount: 249.98,
+		UpdateTime:  baseTime,
+	}
+
 	cartReq := &dto.BusinessReq{
-		CartInfo: &dto.CartInfo{
-			CartID:      "cart_98765_with_many_items",
-			UserID:      "user_12345_frequent_shopper",
-			Items:       cartItems,
-			TotalAmount: 15999.99,
-			UpdateTime:  baseTime,
-		},
-		RequestID:  "req_cart_op_001_get_full_cart_details",
-		ClientType: "mobile_app_version_3.0.0",
+		CartInfo:   cartInfo,
+		RequestID:  "req_cart_op_001",
+		ClientType: "mobile",
 		Version:    "1.5.0",
 		Timestamp:  fixedTimestamp,
 	}
 
-	// 批量查询请求 - 返回所有综合数据
+	// 批量查询请求 - 小包
 	batchQueryReq := &dto.BusinessReq{
 		UserInfo: &dto.UserInfo{
-			UserID:     "user_12345_for_batch_query",
-			Username:   "john_doe_batch_query_user",
-			CreateTime: baseTime.Add(-time.Hour * 24 * 365),
-			UpdateTime: baseTime,
-			Status:     1,
-			IsVIP:      true,
+			UserID: "user_12345",
 		},
 		QueryParam: &dto.QueryParam{
 			PageNum:   1,
-			PageSize:  200,
+			PageSize:  10,
 			SortBy:    "create_time",
 			SortOrder: "desc",
 			Filters: map[string]string{
-				"user_id":           "user_12345",
-				"status":            "1,2,3",
-				"start_time":        "2024-01-01",
-				"end_time":          "2024-12-31",
-				"data_type":         "all",
-				"include_archived":  "true",
-				"include_deleted":   "false",
-				"include_inactive":  "true",
+				"user_id":    "user_12345",
+				"status":     "1",
+				"start_time": "2024-01-01",
+				"end_time":   "2024-12-31",
 			},
 		},
-		RequestID:  "req_batch_query_001_comprehensive_data_retrieval",
-		ClientType: "api_enterprise_version",
+		RequestID:  "req_batch_query_001",
+		ClientType: "api",
 		Version:    "2.0.0",
 		Timestamp:  fixedTimestamp,
 	}
 
-	// 打印每个请求的数据包大小
+	// 打印请求大小
 	scenarios := []TestScenario{
 		{
-			Name:        "用户查询",
-			Description: "查询用户信息 (中等包)",
-			Requests:    []*dto.BusinessReq{userQueryReq},
-			Execute:     comm.QueryUser,
+			Name:     "用户查询",
+			Requests: []*dto.BusinessReq{userQueryReq},
+			Execute:  comm.QueryUser,
 		},
 		{
-			Name:        "订单查询",
-			Description: "查询订单列表 (大包)",
-			Requests:    []*dto.BusinessReq{orderQueryReq},
-			Execute:     comm.QueryOrders,
+			Name:     "订单查询",
+			Requests: []*dto.BusinessReq{orderQueryReq},
+			Execute:  comm.QueryOrders,
 		},
 		{
-			Name:        "商品搜索",
-			Description: "搜索商品 (大包)",
-			Requests:    []*dto.BusinessReq{productSearchReq},
-			Execute:     comm.SearchProducts,
+			Name:     "商品搜索",
+			Requests: []*dto.BusinessReq{productSearchReq},
+			Execute:  comm.SearchProducts,
 		},
 		{
-			Name:        "创建订单",
-			Description: "创建新订单 (超大包)",
-			Requests:    []*dto.BusinessReq{createOrderReq},
-			Execute:     comm.CreateOrder,
+			Name:     "创建订单",
+			Requests: []*dto.BusinessReq{createOrderReq},
+			Execute:  comm.CreateOrder,
 		},
 		{
-			Name:        "获取购物车",
-			Description: "获取购物车信息 (超大包)",
-			Requests:    []*dto.BusinessReq{cartReq},
-			Execute:     comm.GetCart,
+			Name:     "获取购物车",
+			Requests: []*dto.BusinessReq{cartReq},
+			Execute:  comm.GetCart,
 		},
 		{
-			Name:        "批量查询",
-			Description: "批量查询综合数据 (超大包)",
-			Requests:    []*dto.BusinessReq{batchQueryReq},
-			Execute:     comm.BatchQuery,
+			Name:     "批量查询",
+			Requests: []*dto.BusinessReq{batchQueryReq},
+			Execute:  comm.BatchQuery,
 		},
 	}
 
@@ -409,13 +340,6 @@ func initTestScenarios() []TestScenario {
 	fmt.Println("=====================================")
 
 	return scenarios
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // 预热
@@ -582,24 +506,23 @@ func printFinalStats(stats *PerformanceStats) {
 	fmt.Printf("  吞吐量: %.2f MB/s\n", float64(totalReqBytes+totalResBytes)/1024/1024/elapsed.Seconds())
 
 	// 性能评级
-	if qps > 50000 {
-		fmt.Printf("\n性能评级: 超高性能 (>50K QPS) - 适合高并发业务场景\n")
+	if qps > 100000 {
+		fmt.Printf("\n性能评级: 超超高性能 (>100K QPS)\n")
+	} else if qps > 50000 {
+		fmt.Printf("\n性能评级: 超高性能 (50K-100K QPS)\n")
 	} else if qps > 20000 {
-		fmt.Printf("\n性能评级: 高性能 (20K-50K QPS) - 适合中型企业应用\n")
+		fmt.Printf("\n性能评级: 高性能 (20K-50K QPS)\n")
 	} else if qps > 10000 {
-		fmt.Printf("\n性能评级: 中高性能 (10K-20K QPS) - 适合一般业务应用\n")
-	} else if qps > 5000 {
-		fmt.Printf("\n性能评级: 标准 (5K-10K QPS) - 适合小型应用\n")
+		fmt.Printf("\n性能评级: 中高性能 (10K-20K QPS)\n")
 	} else {
-		fmt.Printf("\n性能评级: 需优化 (<5K QPS)\n")
+		fmt.Printf("\n性能评级: 标准 (<10K QPS)\n")
 	}
 
 	// 建议
 	fmt.Printf("\n优化建议:\n")
-	if qps < 20000 {
-		fmt.Printf("  - 考虑使用连接池优化\n")
-		fmt.Printf("  - 考虑使用更快的序列化方式\n")
-		fmt.Printf("  - 检查是否有CPU或内存瓶颈\n")
+	if qps < 50000 {
+		fmt.Printf("  - 检查网络带宽是否充足\n")
+		fmt.Printf("  - 检查服务端 CPU 使用率\n")
 	}
 	fmt.Printf("  - 监控GC频率，考虑调整GOGC参数\n")
 }

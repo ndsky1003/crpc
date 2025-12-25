@@ -171,7 +171,7 @@ func main1() {
 		if tid := trace.ExtractorTraceID(ctx); tid != "" {
 			r.Add("trace_id", tid)
 		}
-	}).SetAddSource(true))
+	}).SetAddSource(true).SetLevel(log.LevelDebug))
 	// 1. 初始化 Client
 	c, err := client.Dial(context.Background(), "client3", ":8080",
 		client.Options().SetSecret("ddddd").

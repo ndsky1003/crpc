@@ -81,12 +81,16 @@ func (s *BusinessService) QueryOrders(ctx context.Context, req *dto.BusinessReq)
 	// // fmt.Printf("[BusinessService] QueryOrders Called: RequestID=%s\n", req.RequestID)
 
 	// 模拟查询订单列表
-	orders := make([]*dto.OrderInfo, 10)
 	pageSize := int32(10)
 	if req.QueryParam != nil && req.QueryParam.PageSize > 0 {
 		pageSize = req.QueryParam.PageSize
 	}
+	// 限制最大返回数量，防止内存爆炸
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
 
+	orders := make([]*dto.OrderInfo, pageSize)
 	for i := 0; i < int(pageSize); i++ {
 		orders[i] = dto.CreateTestOrder(int(time.Now().UnixNano() + int64(i*1000)))
 		if req.QueryParam != nil {
@@ -145,12 +149,16 @@ func (s *BusinessService) SearchProducts(ctx context.Context, req *dto.BusinessR
 	// // fmt.Printf("[BusinessService] SearchProducts Called: RequestID=%s\n", req.RequestID)
 
 	// 模拟商品搜索
-	products := make([]*dto.ProductInfo, 20)
 	pageSize := int32(20)
 	if req.QueryParam != nil && req.QueryParam.PageSize > 0 {
 		pageSize = req.QueryParam.PageSize
 	}
+	// 限制最大返回数量，防止内存爆炸
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
 
+	products := make([]*dto.ProductInfo, pageSize)
 	for i := 0; i < int(pageSize); i++ {
 		products[i] = dto.CreateTestProduct(int(time.Now().UnixNano() + int64(i*1000)))
 		if req.QueryParam != nil {
