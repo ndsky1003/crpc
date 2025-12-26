@@ -6,6 +6,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof" // 导入pprof
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -15,20 +17,20 @@ import (
 	"github.com/ndsky1003/crpc/v3/coder"
 	"github.com/ndsky1003/crpc/v3/example/comm"
 	"github.com/ndsky1003/crpc/v3/example/dto"
-	"github.com/ndsky1003/crpc/v3/example/trace"
 )
 
 // 性能统计
 type PerformanceStats struct {
-	TotalRequests int64     `json:"total_requests"`
-	SuccessRequests int64    `json:"success_requests"`
-	FailedRequests  int64    `json:"failed_requests"`
-	TotalLatency    int64    `json:"total_latency_ns"`
-	MinLatency      int64    `json:"min_latency_ns"`
-	MaxLatency      int64    `json:"max_latency_ns"`
-	StartTime       time.Time `json:"start_time"`
-	TotalReqBytes   int64     `json:"total_req_bytes"`
-	TotalResBytes   int64     `json:"total_res_bytes"`
+	TotalRequests   int64            `json:"total_requests"`
+	SuccessRequests int64            `json:"success_requests"`
+	FailedRequests  int64            `json:"failed_requests"`
+	TotalLatency    int64            `json:"total_latency_ns"`
+	MinLatency      int64            `json:"min_latency_ns"`
+	MaxLatency      int64            `json:"max_latency_ns"`
+	StartTime       time.Time        `json:"start_time"`
+	TotalReqBytes   int64            `json:"total_req_bytes"`
+	TotalResBytes   int64            `json:"total_res_bytes"`
+	LastGCStats     runtime.MemStats `json:"last_gc_stats"` // 上次GC统计
 }
 
 // 测试场景
@@ -36,6 +38,8 @@ type TestScenario struct {
 	Name     string
 	Requests []*dto.BusinessReq
 	Execute  func(context.Context, *dto.BusinessReq, ...*client.Option) (*dto.BusinessRes, error)
+	ResBytes int // 预计算的响应大小(字节)
+	ReqBytes int // 预计算的请求大小(字节)
 }
 
 func main() {
@@ -49,14 +53,36 @@ func main() {
 	// 优化运行时
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
+	// 【GC分析】添加pprof支持,用于内存分析
+	// 使用方法:
+	//   1. 运行测试后,在另一个终端执行:
+	//      curl http://localhost:6060/debug/pprof/heap > heap.prof
+	//   2. 分析堆内存:
+	//      go tool pprof heap.prof
+	//      (pprof) top           # 查看内存分配最多的函数
+	//      (pprof) list <func>   # 查看具体函数的内存分配
+	//      (pprof) web           # 生成可视化图(需要graphviz)
+	go func() {
+		fmt.Println("pprof HTTP server started on :6060")
+		fmt.Println("获取内存profile: curl http://localhost:6060/debug/pprof/heap > heap.prof")
+		fmt.Println("获取分配profile: curl http://localhost:6060/debug/pprof/allocs > allocs.prof")
+		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			fmt.Printf("pprof server error: %v\n", err)
+		}
+	}()
+
 	// 初始化客户端
 	c, err := client.Dial(context.Background(), "client6_small", ":8080",
 		client.Options().SetSecret("ddddd").
-			SetWithTraceID(func(ctx context.Context, tid string) context.Context {
-				return trace.WithTraceID(ctx, tid)
-			}).SetGenTraceID(func(ctx context.Context) string {
-			return trace.ExtractorTraceID(ctx)
-		}))
+			SetMetaCoderT(coder.Msgp).
+			SetReqCoderT(coder.Msgp).
+			SetResCoderT(coder.Msgp))
+	// 【GC优化】移除TraceID相关配置,压测场景不需要链路追踪
+	// SetWithTraceID(func(ctx context.Context, tid string) context.Context {
+	//     return trace.WithTraceID(ctx, tid)
+	// }).SetGenTraceID(func(ctx context.Context) string {
+	//     return trace.ExtractorTraceID(ctx)
+	// }))
 	if err != nil {
 		fmt.Printf("dial error: %v\n", err)
 		return
@@ -94,6 +120,10 @@ func runOneHourTest() {
 	stopMonitor := make(chan bool)
 	go performanceMonitor(stats, stopMonitor)
 
+	// 启动内存分配监控协程(每秒监控一次)
+	stopMemMonitor := make(chan bool)
+	go memoryAllocationMonitor(stopMemMonitor)
+
 	// 测试参数
 	testDuration := time.Hour
 	concurrency := runtime.NumCPU() * 20 // 每个CPU核心20个goroutine
@@ -118,9 +148,6 @@ func runOneHourTest() {
 			scenarioIndex := goroutineID % len(scenarios)
 			scenario := scenarios[scenarioIndex]
 
-			// 预计算请求大小（固定不变）
-			reqBytes, _ := coder.Marshal(coder.Msgp, scenario.Requests[0])
-
 			for {
 				select {
 				case <-ctx.Done():
@@ -134,15 +161,14 @@ func runOneHourTest() {
 					res, err := scenario.Execute(context.Background(), req)
 					latency := time.Since(start)
 
-					// 统计数据包大小
-					var resBytes int
-					if res != nil {
-						resData, _ := coder.Marshal(coder.Msgp, res)
-						resBytes = len(resData)
+					// 使用预计算的请求和响应大小,避免频繁序列化
+					if res == nil {
+						// 如果响应为nil,响应大小记为0
+						updateStats(stats, err, latency, scenario.ReqBytes, 0)
+					} else {
+						// 使用预计算的响应大小
+						updateStats(stats, err, latency, scenario.ReqBytes, scenario.ResBytes)
 					}
-
-					// 更新统计
-					updateStats(stats, err, latency, len(reqBytes), resBytes)
 				}
 			}
 		}(i)
@@ -152,6 +178,7 @@ func runOneHourTest() {
 	wg.Wait()
 	cancel()
 	close(stopMonitor)
+	close(stopMemMonitor)
 
 	// 打印最终统计
 	printFinalStats(stats)
@@ -165,12 +192,12 @@ func initTestScenarios() []TestScenario {
 	// 用户查询请求 - 小包
 	userQueryReq := &dto.BusinessReq{
 		UserInfo: &dto.UserInfo{
-			UserID:    "user_12345",
-			Username:  "john_doe",
-			Email:     "john@example.com",
-			Phone:     "13800138000",
-			IsVIP:     true,
-			Status:    1,
+			UserID:   "user_12345",
+			Username: "john_doe",
+			Email:    "john@example.com",
+			Phone:    "13800138000",
+			IsVIP:    true,
+			Status:   1,
 		},
 		QueryParam: &dto.QueryParam{
 			PageNum:   1,
@@ -297,7 +324,7 @@ func initTestScenarios() []TestScenario {
 		Timestamp:  fixedTimestamp,
 	}
 
-	// 打印请求大小
+	// 创建测试场景
 	scenarios := []TestScenario{
 		{
 			Name:     "用户查询",
@@ -331,11 +358,30 @@ func initTestScenarios() []TestScenario {
 		},
 	}
 
-	// 打印请求大小
+	// 预计算请求和响应大小,避免在测试循环中频繁序列化
 	fmt.Println("\n========== 请求数据包大小 ==========")
-	for _, s := range scenarios {
-		reqBytes, _ := coder.Marshal(coder.Msgp, s.Requests[0])
-		fmt.Printf("%s: %d bytes (%.2f KB)\n", s.Name, len(reqBytes), float64(len(reqBytes))/1024)
+	for i := range scenarios {
+		// 预计算请求大小
+		reqBytes, _ := coder.Marshal(coder.Msgp, scenarios[i].Requests[0])
+		scenarios[i].ReqBytes = len(reqBytes)
+
+		// 执行一次请求获取响应,并预计算响应大小
+		ctx := context.Background()
+		res, err := scenarios[i].Execute(ctx, scenarios[i].Requests[0])
+		if err != nil {
+			fmt.Printf("警告: %s 预执行失败: %v\n", scenarios[i].Name, err)
+			scenarios[i].ResBytes = 0
+		} else {
+			resBytes, _ := coder.Marshal(coder.Msgp, res)
+			scenarios[i].ResBytes = len(resBytes)
+		}
+
+		fmt.Printf("%s: 请求=%d bytes (%.2f KB), 响应=%d bytes (%.2f KB)\n",
+			scenarios[i].Name,
+			scenarios[i].ReqBytes,
+			float64(scenarios[i].ReqBytes)/1024,
+			scenarios[i].ResBytes,
+			float64(scenarios[i].ResBytes)/1024)
 	}
 	fmt.Println("=====================================")
 
@@ -404,6 +450,59 @@ func performanceMonitor(stats *PerformanceStats, stop chan bool) {
 	}
 }
 
+// 内存分配监控器(每秒监控一次,用于定位GC热点)
+func memoryAllocationMonitor(stop chan bool) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	var lastM runtime.MemStats
+	runtime.ReadMemStats(&lastM)
+
+	count := 0
+	totalAlloc := 0.0
+	totalGC := uint32(0)
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			count++
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+
+			// 计算每秒的内存分配和GC
+			allocDiff := float64(m.TotalAlloc-lastM.TotalAlloc) / 1024 / 1024
+			numGC := m.NumGC - lastM.NumGC
+
+			totalAlloc += allocDiff
+			totalGC += numGC
+
+			// 每10秒打印一次详细信息和平均值
+			if count%10 == 0 {
+				avgAlloc := totalAlloc / 10.0
+				avgGC := float64(totalGC) / 10.0
+				fmt.Printf("\n[内存监控 %ds] 近10秒平均: 每秒分配 %.2f MB/秒, GC %.1f 次/秒 | 本次: %.2f MB, %d GC\n",
+					count,
+					avgAlloc,
+					avgGC,
+					allocDiff,
+					numGC)
+
+				// 重置累计
+				totalAlloc = 0
+				totalGC = 0
+			} else {
+				// 非报告周期，简单打印当前秒
+				fmt.Printf("[内存监控 %ds] 分配: %.2f MB, GC: %d 次\n",
+					count, allocDiff, numGC)
+			}
+
+			lastM = m
+		}
+	}
+}
+
 // 打印统计信息
 func printStats(stats *PerformanceStats, reportCount int) {
 	totalReq := atomic.LoadInt64(&stats.TotalRequests)
@@ -458,6 +557,27 @@ func printStats(stats *PerformanceStats, reportCount int) {
 	fmt.Printf("  内存使用: %.2f MB\n", float64(m.Alloc)/1024/1024)
 	fmt.Printf("  系统内存: %.2f MB\n", float64(m.Sys)/1024/1024)
 	fmt.Printf("  GC次数: %d\n", m.NumGC)
+	fmt.Printf("  GC频率: %.2f 次/秒\n", float64(m.NumGC)/elapsed.Seconds())
+
+	// 计算GC相关的详细指标
+	gcPauseTotal := time.Duration(m.PauseTotalNs)
+	if m.NumGC > 0 {
+		avgGCPause := gcPauseTotal / time.Duration(m.NumGC)
+		fmt.Printf("  GC总暂停时间: %v\n", gcPauseTotal.Round(time.Millisecond))
+		fmt.Printf("  平均GC暂停: %v\n", avgGCPause.Round(time.Microsecond))
+		fmt.Printf("  最后GC暂停: %v\n", time.Duration(m.PauseNs[(m.NumGC+255)%256]).Round(time.Microsecond))
+	}
+
+	// 计算从上次报告以来的GC增量
+	if reportCount > 1 && m.NumGC > stats.LastGCStats.NumGC {
+		gcDelta := m.NumGC - stats.LastGCStats.NumGC
+		gcRate := float64(gcDelta) / 300.0 // 5分钟=300秒
+		fmt.Printf("  本报告周期GC增量: %d (%.2f 次/秒)\n", gcDelta, gcRate)
+	}
+
+	// 保存本次GC统计供下次对比
+	stats.LastGCStats = m
+
 	fmt.Printf("  Goroutine数: %d\n", runtime.NumGoroutine())
 	fmt.Printf("\n数据传输:\n")
 	fmt.Printf("  请求数据: %.2f MB (平均 %.2f KB/请求)\n", float64(totalReqBytes)/1024/1024, avgReqKB)
