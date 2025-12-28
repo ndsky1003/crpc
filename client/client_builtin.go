@@ -110,7 +110,7 @@ func (c *Client) HandleMsg(data []byte) error {
 	if err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
-	ctx := context.Background()
+	ctx := backgroundCtx //context.Background()
 	if h.TraceID != "" && c.opt.WithTraceID != nil {
 		ctx = c.opt.WithTraceID(ctx, h.TraceID)
 	}
@@ -276,7 +276,7 @@ func (c *Client) sendReply(h *header.Header, res any, err error) error {
 		if err != nil {
 			return errors.New(errors.ClientInternal, err.Error())
 		}
-		if err := c.sendPacket(context.Background(), data); err != nil {
+		if err := c.sendPacket(backgroundCtx, data); err != nil {
 			return errors.New(errors.ClientInternal, err.Error())
 		}
 		return nil
@@ -292,7 +292,7 @@ func (c *Client) sendReply(h *header.Header, res any, err error) error {
 		return err
 	}
 
-	if err := c.sendPacket(context.Background(), data); err != nil {
+	if err := c.sendPacket(backgroundCtx, data); err != nil {
 		return errors.New(errors.ClientInternal, err.Error())
 	}
 	return nil

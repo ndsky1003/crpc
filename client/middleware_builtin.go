@@ -131,7 +131,7 @@ func MwBroadcast(c *Client) HandlerFunc {
 			call.BroadcastResNewFunc = opt.BroadcastResNewFunc
 			call.BroadcastResCallBack = opt.BroadcastResCallBack
 			call.broadcastCh = make(chan *broadcastresult.Result, *opt.BroadcastChanCap)
-			call.subCtx, call.subCancel = context.WithCancel(context.Background())
+			call.subCtx, call.subCancel = context.WithCancel(backgroundCtx)
 			if ctx.Header.Flags.IsDebug() {
 				slog.DebugContext(ctx.Ctx, "MwBroadcast", "header", ctx.Header)
 			}

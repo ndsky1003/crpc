@@ -7,6 +7,8 @@ import (
 	"github.com/ndsky1003/crpc/v3/protocol/header/headertype"
 )
 
+var backgroundCtx = context.Background()
+
 // Use 插入中间件
 // 默认插入策略：为了保证业务逻辑生效，我们把用户中间件插在 Codec 之前 (倒数第2个位置之前)
 // 这样用户可以修改 Args, Opts, Context 等，但不会破坏 Init/Header 的基础环境
