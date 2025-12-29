@@ -1,7 +1,7 @@
 package netpool
 
 import (
-	"github.com/ndsky1003/buffer/v2"
+	"github.com/ndsky1003/buffer/v3"
 )
 
 var pool = buffer.NewBytePool(
