@@ -10,7 +10,7 @@ require (
 	github.com/ndsky1003/buffer/v3 v3.0.0
 	github.com/ndsky1003/log v1.0.1
 	github.com/ndsky1003/net/v2 v2.0.1
-	github.com/panjf2000/ants/v2 v2.11.3
+	github.com/panjf2000/ants/v2 v2.11.4
 	github.com/tinylib/msgp v1.6.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	golang.org/x/sync v0.19.0

@@ -103,16 +103,17 @@ func (s *server_mgr) OnMessage(sess server.Session, data []byte) error {
 		if h.Deadline > 0 {
 			now := uint64(time.Now().UnixMicro())
 			if now >= h.Deadline { //超时
+				// slog.Warn("收到的请求消息已经超时", "header", h, "data", data)
+				slog.Warn("收到的请求消息已经超时", "header", h, "deadline", time.UnixMicro(int64(h.Deadline)))
 				netpool.Release(data)
 				defer h.Release()
-				slog.Warn("收到的请求消息已经超时", "header", h, "data", data)
 				if h.Type == headertype.Req {
 					if h.Flags.IsBroadcast() {
 						h.Flags.With(headerflags.EOS)
 					}
 					return s.replyError(sess, h, errors.New(errors.ServerDeadlineExceeded, "server-side timeout deadline exceeded"))
 				} else {
-					slog.Warn("收到的消息已经超时直接丢弃", "header", h, "data", data)
+					slog.Warn("收到的消息已经超时直接丢弃", "header", h)
 					return nil
 				}
 			}
